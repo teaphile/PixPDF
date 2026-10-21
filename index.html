@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>PixPDF — Every PDF &amp; image tool, 100% private</title>
+    <meta
+      name="description"
+      content="Merge, split, compress, convert, sign and edit PDFs and images right in your browser. 41 free tools. No uploads, no accounts, no watermark."
+    />
+    <meta name="theme-color" content="#f7f6ff" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="canonical" href="https://pixpdf.app/" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="PixPDF" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PixPDF" />
+    <meta property="og:title" content="PixPDF — Every PDF & image tool, 100% private" />
+    <meta
+      property="og:description"
+      content="41 free PDF and image tools that run entirely in your browser. Your files never leave your device."
+    />
+    <meta property="og:image" content="https://pixpdf.app/og.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://pixpdf.app/" />
+    <meta property="og:locale" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PixPDF — Every PDF & image tool, 100% private" />
+    <meta
+      name="twitter:description"
+      content="41 free PDF and image tools that run entirely in your browser. No uploads. No sign-up."
+    />
+    <meta name="twitter:image" content="https://pixpdf.app/og.svg" />
+    <meta name="twitter:image:alt" content="PixPDF logo with the tagline: every file tool, zero uploads" />
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem("pixpdf-theme");
+          const dark = saved
+            ? saved === "dark"
+            : window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+          const themeColor = document.querySelector('meta[name="theme-color"]');
+          if (themeColor) themeColor.content = dark ? "#0c0b16" : "#f7f6ff";
+        } catch {}
+      })();
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "PixPDF",
+        "url": "https://pixpdf.app/",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Any",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "description": "A private, offline-first PDF and image toolkit. Merge, split, compress, convert, sign and edit files entirely in your browser.",
+        "featureList": "Merge PDF, Split PDF, Compress PDF, PDF to JPG, JPG to PDF, Image compression, Image conversion"
+      }
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div id="app">
+      <div class="boot-loader" role="status" aria-label="Loading PixPDF">
+        <div class="boot-logo" aria-hidden="true">
+          <svg viewBox="0 0 48 48" width="48" height="48">
+            <defs>
+              <linearGradient id="bootGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#7c5cff" />
+                <stop offset="1" stop-color="#ff5c8a" />
+              </linearGradient>
+            </defs>
+            <rect width="48" height="48" rx="14" fill="url(#bootGrad)" />
+            <path d="M16 12h11l7 7v17a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2Z" fill="#fff" opacity=".95" />
+            <path d="M27 12v5a2 2 0 0 0 2 2h5" fill="none" stroke="#c9bcff" stroke-width="2" />
+            <path d="M19 26h10M19 31h7" stroke="#7c5cff" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </div>
+        <span class="boot-text">Preparing your private workspace…</span>
+      </div>
+    </div>
+    <noscript>
+      <div class="noscript">PixPDF needs JavaScript to process files locally in your browser.</div>
+    </noscript>
+  </body>
+</html>

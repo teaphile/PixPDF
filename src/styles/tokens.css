@@ -1,0 +1,220 @@
+:root {
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #f7f6ff;
+  --bg-soft: #f1effc;
+  --surface: #ffffff;
+  --surface-2: #f8f7ff;
+  --surface-3: #f1eefb;
+  --text: #1b1830;
+  --text-soft: #3d3858;
+  --muted: #6a6684;
+  --muted-2: #8e8aa6;
+  --border: rgba(31, 24, 74, 0.09);
+  --border-strong: rgba(31, 24, 74, 0.16);
+  --primary: #6c4df6;
+  --primary-strong: #5638e6;
+  --primary-soft: #ede9ff;
+  --primary-ink: #4b2fd0;
+  --accent: #ff5c8a;
+  --accent-soft: #ffe8ef;
+  --success: #0f9d77;
+  --success-soft: #e1f8f0;
+  --warning: #d98a12;
+  --warning-soft: #fff3df;
+  --danger: #d94a5e;
+  --danger-soft: #ffe9ed;
+  --ink-on-primary: #ffffff;
+  --radius-xs: 8px;
+  --radius-sm: 11px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
+  --shadow-xs: 0 1px 2px rgba(24, 16, 66, 0.05);
+  --shadow-sm: 0 2px 10px rgba(31, 24, 80, 0.06);
+  --shadow-md: 0 14px 34px -16px rgba(35, 24, 86, 0.22);
+  --shadow-lg: 0 30px 70px -30px rgba(35, 24, 86, 0.28);
+  --shadow-primary: 0 12px 28px -12px rgba(108, 77, 246, 0.55);
+  --header-height: 74px;
+  --container: 1216px;
+  --ease: cubic-bezier(0.22, 0.8, 0.28, 1);
+  --transition: 180ms var(--ease);
+}
+
+[data-theme="dark"] {
+  --bg: #0c0b16;
+  --bg-soft: #100e1d;
+  --surface: #161424;
+  --surface-2: #1b1830;
+  --surface-3: #23203a;
+  --text: #f2efff;
+  --text-soft: #d6d1ee;
+  --muted: #a29dbd;
+  --muted-2: #7e7998;
+  --border: rgba(255, 255, 255, 0.085);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --primary: #8a6fff;
+  --primary-strong: #a18aff;
+  --primary-soft: rgba(124, 92, 255, 0.16);
+  --primary-ink: #c4b5ff;
+  --accent: #ff759c;
+  --accent-soft: rgba(255, 92, 138, 0.14);
+  --success: #35d6a8;
+  --success-soft: rgba(17, 196, 146, 0.14);
+  --warning: #f0b245;
+  --warning-soft: rgba(240, 178, 69, 0.13);
+  --danger: #ff7d8f;
+  --danger-soft: rgba(255, 92, 120, 0.14);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 18px 40px -18px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 34px 80px -30px rgba(0, 0, 0, 0.8);
+  --shadow-primary: 0 14px 32px -14px rgba(124, 92, 255, 0.65);
+}
+
+.tone-violet {
+  --tone: #6c4df6;
+  --tone-ink: #4a2fd6;
+  --tone-soft: #efebff;
+}
+.tone-rose {
+  --tone: #ef4e7e;
+  --tone-ink: #c02958;
+  --tone-soft: #ffe9f0;
+}
+.tone-orange {
+  --tone: #ef7a2f;
+  --tone-ink: #c25712;
+  --tone-soft: #fff0e3;
+}
+.tone-amber {
+  --tone: #d99a11;
+  --tone-ink: #a57206;
+  --tone-soft: #fff5da;
+}
+.tone-lime {
+  --tone: #67a82b;
+  --tone-ink: #4a821a;
+  --tone-soft: #eef9df;
+}
+.tone-emerald {
+  --tone: #0f9d77;
+  --tone-ink: #087658;
+  --tone-soft: #e0f8f0;
+}
+.tone-green {
+  --tone: #16a34a;
+  --tone-ink: #0c7a36;
+  --tone-soft: #e3f8ea;
+}
+.tone-teal {
+  --tone: #0d9d9d;
+  --tone-ink: #077777;
+  --tone-soft: #e0f7f7;
+}
+.tone-sky {
+  --tone: #1989d8;
+  --tone-ink: #0d68a8;
+  --tone-soft: #e2f2fd;
+}
+.tone-blue {
+  --tone: #3b6cf0;
+  --tone-ink: #214fd0;
+  --tone-soft: #e8eeff;
+}
+.tone-indigo {
+  --tone: #5856d6;
+  --tone-ink: #3d3bb3;
+  --tone-soft: #ecebff;
+}
+.tone-red {
+  --tone: #dd4457;
+  --tone-ink: #b32537;
+  --tone-soft: #ffe8ec;
+}
+.tone-purple {
+  --tone: #a14ae0;
+  --tone-ink: #7e2cba;
+  --tone-soft: #f6e9ff;
+}
+.tone-fuchsia {
+  --tone: #c93ba8;
+  --tone-ink: #a01e83;
+  --tone-soft: #fde8f7;
+}
+.tone-cyan {
+  --tone: #0b9fbd;
+  --tone-ink: #067a92;
+  --tone-soft: #dff8fd;
+}
+.tone-slate {
+  --tone: #5b6480;
+  --tone-ink: #414a66;
+  --tone-soft: #eef0f7;
+}
+
+[data-theme="dark"] .tone-violet {
+  --tone: #a48dff;
+  --tone-ink: #c8baff;
+  --tone-soft: rgba(124, 92, 255, 0.16);
+}
+[data-theme="dark"] .tone-rose {
+  --tone: #ff86a8;
+  --tone-ink: #ffb1c6;
+  --tone-soft: rgba(255, 92, 138, 0.14);
+}
+[data-theme="dark"] .tone-orange {
+  --tone: #ffa76a;
+  --tone-ink: #ffc59b;
+  --tone-soft: rgba(239, 122, 47, 0.15);
+}
+[data-theme="dark"] .tone-amber {
+  --tone: #f3c14d;
+  --tone-ink: #ffdb8a;
+  --tone-soft: rgba(217, 154, 17, 0.15);
+}
+[data-theme="dark"] .tone-lime {
+  --tone: #a3d95f;
+  --tone-ink: #c6eb92;
+  --tone-soft: rgba(103, 168, 43, 0.16);
+}
+[data-theme="dark"] .tone-emerald,
+[data-theme="dark"] .tone-green {
+  --tone: #4bdcb2;
+  --tone-ink: #8cebd1;
+  --tone-soft: rgba(15, 157, 119, 0.16);
+}
+[data-theme="dark"] .tone-teal {
+  --tone: #4ed6d6;
+  --tone-ink: #8ae9e9;
+  --tone-soft: rgba(13, 157, 157, 0.16);
+}
+[data-theme="dark"] .tone-sky,
+[data-theme="dark"] .tone-cyan {
+  --tone: #67c5f5;
+  --tone-ink: #9adcff;
+  --tone-soft: rgba(25, 137, 216, 0.16);
+}
+[data-theme="dark"] .tone-blue,
+[data-theme="dark"] .tone-indigo {
+  --tone: #8ba6ff;
+  --tone-ink: #b6c7ff;
+  --tone-soft: rgba(59, 108, 240, 0.16);
+}
+[data-theme="dark"] .tone-red,
+[data-theme="dark"] .tone-rose {
+  --tone: #ff8e9d;
+  --tone-ink: #ffb8c1;
+  --tone-soft: rgba(221, 68, 87, 0.14);
+}
+[data-theme="dark"] .tone-purple,
+[data-theme="dark"] .tone-fuchsia {
+  --tone: #d68bff;
+  --tone-ink: #e8bbff;
+  --tone-soft: rgba(161, 74, 224, 0.16);
+}
+[data-theme="dark"] .tone-slate {
+  --tone: #aab4d4;
+  --tone-ink: #cdd4e9;
+  --tone-soft: rgba(91, 100, 128, 0.22);
+}

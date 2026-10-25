@@ -8,7 +8,7 @@
  * except for its name.
  */
 import { setImageDpi } from "./image-metadata.js";
-import { canvasToBlob, clamp, sanitizeFilename } from "./utils.js";
+import { canvasToBlob, clamp, formatBytes, sanitizeFilename } from "./utils.js";
 
 const IMAGE_MIME = {
   jpg: "image/jpeg",
@@ -80,6 +80,32 @@ async function decode(blob) {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** Read the pixel size of an encoded image without touching the DOM layout. */
+async function pixelSize(blob) {
+  try {
+    const source = await decode(blob);
+    const size = { width: source.width || source.naturalWidth, height: source.height || source.naturalHeight };
+    source.close?.();
+    return size;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tools bake the output size into the name (`photo-1600x1067.jpg`). When a
+ * target-size search shrinks the image afterwards, that suffix is a lie —
+ * keep it in sync with the bytes we are actually handing over.
+ */
+async function syncSizeInName(name, blob) {
+  const match = /-(\d+)x(\d+)(\.[a-z0-9]{2,5})$/i.exec(name);
+  if (!match) return name;
+  const size = await pixelSize(blob);
+  if (!size?.width || !size?.height) return name;
+  if (Number(match[1]) === size.width && Number(match[2]) === size.height) return name;
+  return name.replace(/-(\d+)x(\d+)(\.[a-z0-9]{2,5})$/i, `-${size.width}x${size.height}$3`);
 }
 
 async function encode(blob, { format, quality, background, grayscale, scale = 1 }) {
@@ -159,15 +185,24 @@ export function applyOutputName(outputs, outputName, { zip = false } = {}) {
   const name = sanitizeFilename(String(outputName || "").trim(), "");
   if (!name) return outputs;
   if (zip) return outputs; // handled by the ZIP packer
-  if (outputs.length === 1) {
-    const output = outputs[0];
-    const ext = /\.([a-z0-9]{1,6})$/i.exec(output.name)?.[1] || "bin";
-    return [{ ...output, name: `${name}.${ext}` }];
-  }
-  return outputs.map((output, index) => {
-    const ext = /\.([a-z0-9]{1,6})$/i.exec(output.name)?.[1] || "bin";
-    return { ...output, name: `${name}-${String(index + 1).padStart(2, "0")}.${ext}` };
-  });
+  const renamed =
+    outputs.length === 1
+      ? [
+          {
+            ...outputs[0],
+            name: `${name}.${/\.([a-z0-9]{1,6})$/i.exec(outputs[0].name)?.[1] || "bin"}`
+          }
+        ]
+      : outputs.map((output, index) => ({
+          ...output,
+          name: `${name}-${String(index + 1).padStart(2, "0")}.${
+            /\.([a-z0-9]{1,6})$/i.exec(output.name)?.[1] || "bin"
+          }`
+        }));
+  // A plain .map() would drop the notes/warnings attached to the array.
+  renamed.notes = outputs.notes;
+  renamed.warnings = outputs.warnings;
+  return renamed;
 }
 
 /**
@@ -177,6 +212,7 @@ export function applyOutputName(outputs, outputName, { zip = false } = {}) {
 export async function applyOutputOptions(outputs, values = {}) {
   if (!outputs?.length) return outputs;
   const result = [];
+  const extraNotes = [];
   const format = values.outputFormat || "keep";
   const quality = clamp(Number(values.outputQuality ?? 0.92) || 0.92, 0.1, 1);
   const background = values.outputBackground || "#ffffff";
@@ -208,6 +244,12 @@ export async function applyOutputOptions(outputs, values = {}) {
             format: format === "keep" ? "jpg" : format
           });
           name = replaceExtension(name, currentFormat(blob));
+          name = await syncSizeInName(name, blob);
+          if (blob.size > targetKb * 1024 * 1.02) {
+            extraNotes.push(
+              `${name}: ${formatBytes(blob.size)} is the smallest this image can get — the ${targetKb} KB target could not be reached.`
+            );
+          }
         }
         if (dpi > 0) blob = await setImageDpi(blob, dpi);
       }
@@ -216,13 +258,17 @@ export async function applyOutputOptions(outputs, values = {}) {
     }
     result.push({ ...output, blob, name });
   }
-  result.notes = outputs.notes;
+  const baseNotes = Array.isArray(outputs.notes) ? outputs.notes : [];
+  result.notes = [...baseNotes, ...extraNotes];
   result.warnings = outputs.warnings;
   return applyOutputName(result, values.outputName);
 }
 
 export function zipNameFor(values, fallback = "pixpdf-results.zip") {
-  const name = sanitizeFilename(String(values?.outputName || "").trim(), "");
-  if (!name) return fallback;
-  return name.toLowerCase().endsWith(".zip") ? name : `${name}.zip`;
+  const preferred = sanitizeFilename(String(values?.outputName || "").trim(), "");
+  // The fallback is often the tool's single-file name ("passport-photo.png");
+  // a ZIP containing that file must not masquerade as a .png download.
+  const base = preferred || String(fallback || "pixpdf-results.zip");
+  const cleaned = base.replace(/\.(zip|pdf|png|jpe?g|webp|gif|bmp|ico|svg|txt|md|csv|json|html)$/i, "");
+  return `${cleaned || "pixpdf-results"}.zip`;
 }

@@ -241,25 +241,51 @@ export async function pdfToImages(file, options, { progress = () => {}, password
   }
 }
 
+/** Rasterising must never go below this: the page would stop being readable. */
+const MIN_RASTER_DPI = 60;
+const MAX_SIZE_SEARCH_STEPS = 4;
+
+/**
+ * Strong PDF compression: re-render every page as an image.
+ *
+ * Rasterising a digitally-born PDF can easily produce a *larger* file than the
+ * source, so this routine keeps whichever candidate is smallest (including the
+ * untouched original) and reports exactly what it did. When a target size is
+ * set it searches across resolution *and* JPEG quality instead of quality
+ * alone — for PNG pages resolution is the only lever.
+ *
+ * Returns `{ blob, sourceBytes, outputBytes, originalKept, targetBytes,
+ * reachedTarget, dpi, quality }` so the caller can show an honest summary.
+ */
 export async function compressPdfStrong(file, options, { progress = () => {}, password } = {}) {
+  const originalBytes = await fileBytes(file);
+  const sourceBytes = originalBytes.byteLength;
+  const targetBytes = Math.max(0, Number(options.targetSizeKb) || 0) * 1024;
   const source = await openPdfJs(file, password);
   try {
     const total = source.numPages;
-    const dpi = Number(options.customDpi) > 0 ? Number(options.customDpi) : Number(options.dpi) || 150;
-    const scale = dpi / 72;
+    const requestedDpi = Math.max(MIN_RASTER_DPI, Math.min(600, Number(options.dpi) || 150));
     const requestedQuality = Math.max(0.1, Math.min(1, Number(options.quality) || 0.7));
-    const pages = options.pages && String(options.pages).trim()
-      ? parsePageRanges(options.pages, total)
-      : Array.from({ length: total }, (_, index) => index);
+    const pages =
+      options.pages && String(options.pages).trim()
+        ? parsePageRanges(options.pages, total)
+        : Array.from({ length: total }, (_, index) => index);
     const grayscale = options.colorMode === "grayscale";
     const usePng = options.imageFormat === "png";
     const background = options.background || "#ffffff";
+    const pageTotal = pages.length;
 
-    const build = async (quality) => {
+    const build = async (dpi, quality, report) => {
       const target = await PDFDocument.create();
-      for (let index = 0; index < pages.length; index += 1) {
+      const scale = dpi / 72;
+      for (let index = 0; index < pageTotal; index += 1) {
         const pageNumber = pages[index] + 1;
-        progress((index / pages.length) * 0.94, `Compressing page ${pageNumber} of ${total}…`);
+        if (report) {
+          progress(
+            0.05 + (index / pageTotal) * 0.85,
+            `Compressing page ${pageNumber} of ${total} at ${dpi} DPI…`
+          );
+        }
         const page = await source.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
         let { canvas } = await renderPageToCanvas(page, scale, background);
@@ -294,24 +320,64 @@ export async function compressPdfStrong(file, options, { progress = () => {}, pa
         canvas.height = 1;
         await yieldToUi();
       }
-      progress(0.97, "Writing PDF…");
-      return { bytes: await savePdf(target), quality };
+      progress(0.9, "Writing PDF…");
+      return { bytes: await savePdf(target), dpi, quality };
     };
 
-    let result = await build(requestedQuality);
-    const targetBytes = options.targetEnabled ? (Number(options.targetSizeKb) || 500) * 1024 : 0;
-    // Only JPEG reacts to quality; for PNG the resolution preset is the lever.
-    if (targetBytes > 0 && result.bytes.byteLength > targetBytes && !usePng) {
-      const steps = [0.7, 0.55, 0.42, 0.32, 0.24, 0.18, 0.12];
-      for (const step of steps) {
-        if (step >= requestedQuality) continue;
-        const attempt = await build(Math.min(step, requestedQuality));
-        if (attempt.bytes.byteLength <= result.bytes.byteLength) result = attempt;
-        if (result.bytes.byteLength <= targetBytes) break;
+    const smaller = (a, b) => (a.bytes.byteLength <= b.bytes.byteLength ? a : b);
+    let best = { bytes: originalBytes, dpi: 0, quality: 0, strategy: "original" };
+    let last = await build(requestedDpi, requestedQuality, true);
+    best = smaller(best, { ...last, strategy: "raster" });
+
+    let dpi = requestedDpi;
+    let quality = requestedQuality;
+    for (
+      let step = 0;
+      step < MAX_SIZE_SEARCH_STEPS &&
+      targetBytes > 0 &&
+      best.bytes.byteLength > targetBytes;
+      step += 1
+    ) {
+      const ratio = Math.sqrt(targetBytes / Math.max(1, last.bytes.byteLength));
+      let nextDpi = dpi;
+      let nextQuality = quality;
+      if (!usePng && quality > 0.45) {
+        // Soften the image before shrinking it: a slightly compressed page
+        // looks far better than an unreadable low-resolution one.
+        nextQuality = Math.max(0.4, quality * Math.max(0.55, Math.min(0.88, ratio)));
+      } else {
+        nextDpi = Math.max(
+          MIN_RASTER_DPI,
+          Math.round(dpi * Math.max(0.55, Math.min(0.88, ratio)))
+        );
+        if (!usePng) nextQuality = Math.max(0.3, quality * 0.9);
       }
+      if (nextDpi === dpi && Math.abs(nextQuality - quality) < 0.02) break;
+      dpi = nextDpi;
+      quality = Math.round(nextQuality * 100) / 100;
+      progress(
+        0.9,
+        `Trying ${dpi} DPI at ${Math.round(quality * 100)}% quality to reach ${Math.round(
+          targetBytes / 1024
+        )} KB…`
+      );
+      last = await build(dpi, quality, false);
+      best = smaller(best, { ...last, strategy: "raster" });
     }
+
     progress(1, "Done");
-    return new Blob([result.bytes], { type: "application/pdf" });
+    const chosen = best;
+    const outputBytes = chosen.bytes.byteLength;
+    return {
+      blob: new Blob([chosen.bytes], { type: "application/pdf" }),
+      sourceBytes,
+      outputBytes,
+      originalKept: chosen.strategy === "original",
+      targetBytes,
+      reachedTarget: targetBytes > 0 ? outputBytes <= targetBytes : null,
+      dpi: chosen.dpi,
+      quality: chosen.quality
+    };
   } finally {
     await destroyPdfJs(source);
   }
@@ -351,13 +417,75 @@ export function copyPdfMetadata(source, target) {
   }
 }
 
-export async function compressPdfLossless(file, { progress = () => {}, password } = {}) {
+/**
+ * Lossless pass: rebuild the PDF with object streams. pdf-lib's rewrite is
+ * usually a little smaller, but on already-optimised files it can add bytes —
+ * so the original wins whenever it is not larger. Password errors are
+ * re-thrown (the workspace turns those into a prompt); any other rebuild
+ * failure falls back to the untouched file instead of failing the job.
+ */
+export async function compressPdfLossless(file, options = {}, { progress = () => {}, password } = {}) {
+  const originalBytes = await fileBytes(file);
   progress(0.3, "Reading document…");
-  const doc = await openPdf(file, password);
-  progress(0.7, "Optimizing object streams…");
-  const bytes = await savePdf(doc);
-  progress(1, "Done");
-  return new Blob([bytes], { type: "application/pdf" });
+  try {
+    const doc = await openPdf(file, password);
+    progress(0.7, "Optimizing object streams…");
+    const total = doc.getPageCount();
+    const selection =
+      options.pages && String(options.pages).trim() ? parsePageRanges(options.pages, total) : null;
+    const subset =
+      selection && selection.length && selection.length !== total ? selection : null;
+    let bytes;
+    if (subset) {
+      // "Only these pages" must work in lossless mode too: rebuild with just
+      // the requested pages instead of silently compressing the whole file.
+      const out = await PDFDocument.create();
+      const copied = await out.copyPages(doc, subset);
+      copied.forEach((page) => out.addPage(page));
+      copyPdfMetadata(doc, out);
+      bytes = await savePdf(out);
+    } else {
+      bytes = await savePdf(doc);
+    }
+    progress(1, "Done");
+    // Without a page subset, a rebuild that gets bigger is not an improvement.
+    if (!subset && bytes.byteLength >= originalBytes.byteLength) {
+      return {
+        blob: file,
+        sourceBytes: originalBytes.byteLength,
+        outputBytes: originalBytes.byteLength,
+        originalKept: true,
+        targetBytes: 0,
+        reachedTarget: null,
+        dpi: 0,
+        quality: 0
+      };
+    }
+    return {
+      blob: new Blob([bytes], { type: "application/pdf" }),
+      sourceBytes: originalBytes.byteLength,
+      outputBytes: bytes.byteLength,
+      originalKept: false,
+      targetBytes: 0,
+      reachedTarget: null,
+      dpi: 0,
+      quality: 0
+    };
+  } catch (error) {
+    if (isPasswordError(error)) throw error;
+    progress(1, "Done");
+    return {
+      blob: file,
+      sourceBytes: originalBytes.byteLength,
+      outputBytes: originalBytes.byteLength,
+      originalKept: true,
+      failed: true,
+      targetBytes: 0,
+      reachedTarget: null,
+      dpi: 0,
+      quality: 0
+    };
+  }
 }
 
 export async function extractText(file, options, { progress = () => {}, password } = {}) {

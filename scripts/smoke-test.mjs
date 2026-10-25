@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PDFDocument, StandardFonts, degrees, rgb } from "@cantoo/pdf-lib";
 import { stripStaleEncryption } from "../src/lib/pdf-security.js";
 import { parsePageRanges, parsePageRangeGroups, sanitizeFilename } from "../src/lib/utils.js";
@@ -218,5 +221,59 @@ const batchWithNotes = await collectBatch([1], async () => ({
 }));
 assert.deepEqual(batchWithNotes.notes, ["trimmed to fit"]);
 report("batch results carry per-file notes into the result card");
+
+/* ---------------------------------------------------------------------------
+ * Option catalogue integrity
+ *
+ * Every control the UI shows must be wired to code, must be unique inside its
+ * tool, and every tool must expose the shared download-name control. This
+ * guards against the "looks powerful but does nothing" class of bug.
+ * ------------------------------------------------------------------------- */
+
+const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
+function walk(dir, acc = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, acc);
+    else if (full.endsWith(".js")) acc.push(full);
+  }
+  return acc;
+}
+const dataFiles = new Set([
+  path.join(srcRoot, "data/tool-options.js"),
+  path.join(srcRoot, "data/tools.js")
+]);
+const codeText = walk(srcRoot)
+  .filter((file) => !dataFiles.has(file))
+  .map((file) => fs.readFileSync(file, "utf8"))
+  .join("\n");
+
+let checkedOptions = 0;
+for (const tool of tools) {
+  const keys = tool.options.filter((option) => option.type !== "heading").map((option) => option.key);
+  assert.equal(new Set(keys).size, keys.length, `${tool.slug} declares a duplicate option key`);
+  assert.ok(keys.includes("outputName"), `${tool.slug} has no download-name control`);
+  for (const key of keys) {
+    const pattern = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    assert.ok(pattern.test(codeText), `${tool.slug}: option "${key}" is not read by any code`);
+    checkedOptions += 1;
+  }
+}
+report(`every option is unique and wired (${checkedOptions} controls across ${toolCount} tools)`);
+
+const pdfProducers = tools.filter((tool) => (tool.outputs ? tool.outputs === "pdf" : tool.category === "pdf"));
+for (const tool of pdfProducers) {
+  if (tool.slug === "protect-pdf") continue; // encrypted output cannot be edited after the fact
+  const keys = tool.options.map((option) => option.key);
+  assert.ok(keys.includes("pdfTitle"), `${tool.slug} produces a PDF but has no title control`);
+}
+const nonPdfProducers = tools.filter((tool) => tool.outputs && tool.outputs !== "pdf");
+for (const tool of nonPdfProducers) {
+  assert.ok(
+    !tool.options.some((option) => option.key === "pdfTitle"),
+    `${tool.slug} does not produce a PDF but shows PDF metadata controls`
+  );
+}
+report("PDF metadata controls appear only on tools that actually produce PDFs");
 
 console.log("\nAll PDF smoke tests passed.");

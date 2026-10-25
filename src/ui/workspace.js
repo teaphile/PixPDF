@@ -36,6 +36,7 @@ function defaultsFor(options = []) {
 
 function shouldShow(condition, values) {
   if (!condition) return true;
+  if (Array.isArray(condition)) return condition.every((item) => shouldShow(item, values));
   if (Array.isArray(condition.in)) return condition.in.map(String).includes(String(values[condition.key]));
   if (Array.isArray(condition.notIn)) return !condition.notIn.map(String).includes(String(values[condition.key]));
   if ("equals" in condition) return String(values[condition.key]) === String(condition.equals);

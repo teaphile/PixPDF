@@ -3073,3 +3073,9 @@
   border-radius: 0;
   background: color-mix(in srgb, var(--surface-2) 60%, transparent);
 }
+
+.advanced-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.35rem 0.25rem 0.1rem;
+}

@@ -29,6 +29,7 @@ export async function renderResult(
   const parts = [`${outputs.length} file${outputs.length === 1 ? "" : "s"} ready`];
   if (inputs) parts.push(`${formatBytes(inputs)} → ${formatBytes(totalOut)}`);
   if (savedPercent > 3) parts.push(`${savedPercent}% smaller`);
+  if (savedPercent < -3) parts.push(`${Math.abs(savedPercent)}% larger`);
   if (duration) parts.push(formatDuration(duration));
   if (summary) parts.unshift(summary);
 

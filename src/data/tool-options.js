@@ -43,24 +43,31 @@ const text = (key, label, defaultValue = "", extra = {}) => ({
   ...extra
 });
 
-const toggle = (key, label, defaultValue = false, help = "") => ({
+const toggle = (key, label, defaultValue = false, help = "", extra = {}) => ({
   key,
   label,
   type: "checkbox",
   default: defaultValue,
-  help
+  help,
+  ...extra
 });
 
-const select = (key, label, defaultValue, choices, help = "") => ({
+const select = (key, label, defaultValue, choices, help = "", extra = {}) => ({
   key,
   label,
   type: "select",
   default: defaultValue,
   choices,
-  help
+  help,
+  ...extra
 });
 
-const heading = (label) => ({ key: `heading-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, label, type: "heading" });
+const heading = (label, extra = {}) => ({
+  key: `heading-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+  label,
+  type: "heading",
+  ...extra
+});
 
 const PAGE_FONTS = [
   { value: "helvetica", label: "Helvetica — clean sans" },
@@ -116,35 +123,40 @@ export const extraOptions = {
       { value: "pages", label: "…pages-1-3.pdf" },
       { value: "source", label: "…source-01.pdf" }
     ]),
-    number("startNumber", "First part number", 1, 0, 9999),
+    number("startNumber", "First part number", 1, 0, 9999, {
+      showIf: { key: "naming", not: "pages" },
+      help: "Ignored when parts are named after their page numbers."
+    }),
     toggle("preserveMetadata", "Keep title, author and keywords", true),
     toggle("zipParts", "Deliver parts in a ZIP", true, "Turn off to download the first part only.")
   ],
 
   "compress-pdf": [
-    heading("Raster compression"),
-    select("customDpi", "Custom resolution", "0", [
-      { value: "0", label: "Use the preset above" },
-      { value: "72", label: "72 DPI" },
-      { value: "96", label: "96 DPI" },
-      { value: "120", label: "120 DPI" },
-      { value: "180", label: "180 DPI" },
-      { value: "240", label: "240 DPI" },
-      { value: "300", label: "300 DPI" }
-    ], "Overrides the resolution preset when set."),
+    heading("Raster compression", { showIf: { key: "mode", equals: "strong" } }),
     select("colorMode", "Colour mode", "color", [
       { value: "color", label: "Full colour" },
       { value: "grayscale", label: "Grayscale — smaller" }
-    ]),
+    ], "", { showIf: { key: "mode", equals: "strong" } }),
     select("imageFormat", "Page image format", "jpg", [
       { value: "jpg", label: "JPEG — best for scans" },
       { value: "png", label: "PNG — best for line art" }
-    ]),
-    { key: "background", label: "Page background", type: "color", default: "#ffffff" },
+    ], "", { showIf: { key: "mode", equals: "strong" } }),
+    {
+      key: "background",
+      label: "Page background",
+      type: "color",
+      default: "#ffffff",
+      showIf: { key: "mode", equals: "strong" }
+    },
     text("pages", "Only these pages", "", { placeholder: "e.g. 1-5, 9 · blank = all" }),
-    toggle("keepMetadata", "Keep title, author and keywords", true),
-    toggle("targetEnabled", "Aim for a target file size", false),
-    number("targetSizeKb", "Target size", 500, 10, 102400, { suffix: "KB", help: "Quality is reduced automatically until the PDF fits." })
+    toggle("keepMetadata", "Keep title, author and keywords", true, "", {
+      showIf: { key: "mode", equals: "strong" }
+    }),
+    number("targetSizeKb", "Target size", 0, 0, 102400, {
+      suffix: "KB",
+      help: "0 = no limit. Resolution and quality are reduced until the PDF fits; if it cannot fit you get the smallest possible file.",
+      showIf: { key: "mode", equals: "strong" }
+    })
   ],
 
   "pdf-to-jpg": [
@@ -303,7 +315,6 @@ export const extraOptions = {
     { key: "redactColor", label: "Box colour", type: "color", default: "#000000" },
     toggle("redactBorder", "Draw a thin outline", false),
     number("redactExpand", "Expand boxes", 0, -10, 40, { suffix: "pt" }),
-    toggle("keepPageSize", "Keep page size when rebuilding", true),
     select("rebuildDpi", "Rebuild resolution", "150", [
       { value: "110", label: "110 DPI — smallest" },
       { value: "150", label: "150 DPI — balanced" },
@@ -412,8 +423,7 @@ export const extraOptions = {
     number("width", "Resize width", 0, 0, 16000, { suffix: "px", help: "0 = keep original width." }),
     number("height", "Resize height", 0, 0, 16000, { suffix: "px" }),
     toggle("keepAspect", "Keep aspect ratio", true),
-    toggle("grayscale", "Convert to grayscale", false),
-    toggle("autoOrient", "Honour EXIF orientation", true, "Browser decoding applies the camera's orientation automatically.")
+    toggle("grayscale", "Convert to grayscale", false)
   ],
 
   "rotate-image": [
@@ -544,9 +554,8 @@ export const extraOptions = {
   ],
   "passport-photo": [
     heading("Print finish"),
-    { key: "photoBackground", label: "Photo background", type: "color", default: "#ffffff" },
     toggle("photoBorder", "Draw a cut line around the photo", true),
-    range("photoBorderWidth", "Cut line width", 1, 0, 6, 0.5),
+    range("photoBorderWidth", "Cut line width", 1, 0, 6, 0.5)
   ],
   "signature-maker": [
     heading("Signature finish"),
@@ -581,12 +590,16 @@ export const extraOptions = {
 /** Options added to every tool, with implementations in lib/output-options.js. */
 export function commonOptions(tool) {
   const isPdf = tool.category === "pdf";
+  // A few image tools produce a PDF (Image → PDF), so they deserve the same
+  // document metadata controls even though their input is a picture.
+  const outputsPdf = tool.outputs ? tool.outputs === "pdf" : isPdf;
+  const ownKeys = new Set((tool.options || []).map((option) => option.key));
   const options = [];
 
   const hasOwnReader = Boolean(tool.custom);
-  if (isPdf && !["protect-pdf", "unlock-pdf"].includes(tool.slug)) {
+  if (outputsPdf && tool.slug !== "protect-pdf") {
     options.push({ key: "heading-pdf-props", label: "PDF properties", type: "heading", advanced: true });
-    if (!hasOwnReader) {
+    if (isPdf && !hasOwnReader && tool.slug !== "unlock-pdf") {
       options.push(
         text("password", "PDF password (if protected)", "", {
           placeholder: "Leave blank for unprotected files",
@@ -605,17 +618,42 @@ export function commonOptions(tool) {
   const groupHeading = { key: "heading-output", label: "Output & download", type: "heading", advanced: true };
   options.push(groupHeading);
   if (!isPdf) {
-    options.push(
-      select("outputFormat", "Override output format", "keep", OUTPUT_FORMATS, "Re-encodes any image this tool produces."),
-      range("outputQuality", "Re-encode quality", 0.92, 0.3, 1, 0.02),
-      { key: "outputBackground", label: "Matte colour for JPG", type: "color", default: "#ffffff" },
-      toggle("outputGrayscale", "Grayscale output", false),
-      number("targetSize", "Max file size", 0, 0, 102400, {
-        suffix: "KB",
-        help: "0 = no limit. Images are re-encoded and resized until they fit."
-      }),
-      select("dpi", "Print DPI metadata", "0", DPI_CHOICES)
-    );
+    // Any control the tool already offers is skipped here: two settings for the
+    // same thing (format vs. output format, quality vs. re-encode quality) only
+    // confuse people and let one silently override the other.
+    if (!ownKeys.has("format")) {
+      options.push(
+        select("outputFormat", "Override output format", "keep", OUTPUT_FORMATS, "Re-encodes any image this tool produces.")
+      );
+    }
+    if (!ownKeys.has("quality") && !ownKeys.has("jpegQuality")) {
+      options.push(
+        range("outputQuality", "Re-encode quality", 0.92, 0.3, 1, 0.02, "Applies when the image is re-encoded: format change, grayscale, or a size target.")
+      );
+    }
+    if (!ownKeys.has("background")) {
+      options.push({
+        key: "outputBackground",
+        label: "Matte colour for JPG",
+        type: "color",
+        default: "#ffffff",
+        help: "Fills transparent areas when the output becomes a JPG."
+      });
+    }
+    if (!ownKeys.has("grayscale")) {
+      options.push(toggle("outputGrayscale", "Grayscale output", false));
+    }
+    if (!ownKeys.has("target") && !ownKeys.has("targetSizeKb")) {
+      options.push(
+        number("targetSize", "Max file size", 0, 0, 102400, {
+          suffix: "KB",
+          help: "0 = no limit. Images are re-encoded and resized until they fit."
+        })
+      );
+    }
+    if (!ownKeys.has("dpi")) {
+      options.push(select("dpi", "Print DPI metadata", "0", DPI_CHOICES));
+    }
   }
   options.push(
     text("outputName", "Download file name", "", { placeholder: "Automatic name", help: "Multiple files get -01, -02 …; ZIPs use this name." })

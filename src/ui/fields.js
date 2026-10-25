@@ -8,6 +8,7 @@ import { clamp, escapeHtml } from "../lib/utils.js";
 
 export function shouldShowField(condition, values) {
   if (!condition) return true;
+  if (Array.isArray(condition)) return condition.every((item) => shouldShowField(item, values));
   if (Array.isArray(condition.in)) return condition.in.map(String).includes(String(values[condition.key]));
   if (Array.isArray(condition.notIn)) return !condition.notIn.map(String).includes(String(values[condition.key]));
   if ("equals" in condition) return String(values[condition.key]) === String(condition.equals);

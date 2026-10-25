@@ -9,7 +9,7 @@
  */
 import { icon } from "./icons.js";
 import { bindOptionsPanel, defaultsFor } from "./fields.js";
-import { getToolSettings, saveToolSettings } from "../lib/storage.js";
+import { clearToolSettings, getToolSettings, saveToolSettings } from "../lib/storage.js";
 import { escapeHtml } from "../lib/utils.js";
 
 export function advancedPanelMarkup(tool, { open = false, title = "More options" } = {}) {
@@ -19,6 +19,11 @@ export function advancedPanelMarkup(tool, { open = false, title = "More options"
       (option) => option.type !== "heading"
     ).length} controls</em>${icon("ChevronDown", { size: 16, className: "advanced-chevron" })}</summary>
     <div class="custom-options" data-advanced-options></div>
+    <div class="advanced-actions">
+      <button type="button" class="text-button" data-advanced-reset>${icon("RotateCcw", {
+        size: 14
+      })} Reset to defaults</button>
+    </div>
   </details>`;
 }
 
@@ -38,6 +43,13 @@ export function mountAdvancedPanel(root, tool) {
   const panel = bindOptionsPanel(container, tool.options || [], filtered, () => {
     saveToolSettings(tool.slug, panel.values);
   });
+  container.parentElement
+    ?.querySelector("[data-advanced-reset]")
+    ?.addEventListener("click", () => {
+      clearToolSettings(tool.slug);
+      panel.refresh(defaultsFor(tool.options || []));
+      saveToolSettings(tool.slug, panel.values);
+    });
   return {
     values: panel.values,
     refresh: panel.refresh,

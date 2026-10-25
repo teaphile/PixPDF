@@ -1,11 +1,14 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, createProgress, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
+  StandardFonts,
   embedSignatureImage,
   getPdfPageCount,
   openPdf,
   renderPdfPagePreview,
+  rgb,
   savePdf,
   withDisplaySpace
 } from "../../lib/pdf.js";
@@ -31,6 +34,7 @@ export default {
     let file = null;
     let pageCount = 0;
     let busy = false;
+    let advanced = null;
     let strokes = [];
     let uploadedImage = null;
     let drawing = false;
@@ -244,9 +248,11 @@ export default {
           })} ${escapeHtml(tool.action)}</button>
           <p class="run-note">${icon("ShieldCheck", { size: 14 })} Signature and PDF never leave this device.</p>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
       setupPad();
       updatePreview();
     };
@@ -555,7 +561,17 @@ export default {
         } else {
           indices = [total - 1];
         }
+        const extra = advanced?.values || {};
         const signatureImage = await embedSignatureImage(doc, signature);
+        const opacity = Math.max(0.3, Math.min(1, (Number(extra.signatureOpacity) || 100) / 100));
+        const stampDate = extra.addDateStamp === true;
+        const stampDateText = new Date().toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric"
+        });
+        let font = null;
+        if (stampDate) font = await doc.embedFont(StandardFonts.Helvetica);
         indices.forEach((pageIndex) => {
           const page = doc.getPage(pageIndex);
           withDisplaySpace(page, ({ width: pageWidth, height: pageHeight }) => {
@@ -569,7 +585,29 @@ export default {
             if (state.position.startsWith("top")) y = pageHeight - height - margin;
             x = Math.max(6, Math.min(pageWidth - width - 6, x));
             y = Math.max(6, Math.min(pageHeight - height - 6, y));
-            page.drawImage(signatureImage, { x, y, width, height });
+            if (extra.drawSignatureBorder) {
+              page.drawRectangle({
+                x: x - 3,
+                y: y - 3,
+                width: width + 6,
+                height: height + 6,
+                borderColor: rgb(0.72, 0.7, 0.82),
+                borderWidth: 0.7,
+                opacity: 0
+              });
+            }
+            page.drawImage(signatureImage, { x, y, width, height, opacity });
+            if (stampDate && font) {
+              const size = Math.max(7, Math.min(14, height * 0.22));
+              page.drawText(stampDateText, {
+                x,
+                y: Math.max(4, y - size - 4),
+                size,
+                font,
+                color: rgb(0.34, 0.32, 0.45),
+                opacity
+              });
+            }
           });
         });
         const bytes = await savePdf(doc);
@@ -577,6 +615,7 @@ export default {
         const name = `${sanitizeFilename(file.name, "document")}-signed.pdf`;
         renderResult(resultEl, [{ blob, name }], {
           tool,
+          outputOptions: advanced?.values,
           inputs: file.size,
           duration: performance.now() - started,
           onReset: () => {

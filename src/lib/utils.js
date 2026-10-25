@@ -210,10 +210,19 @@ export function acceptMatches(file, accept) {
   });
 }
 
+/** True for pdf-lib, PDF.js and our own password errors. */
+export function isPasswordError(error) {
+  if (!error) return false;
+  const name = String(error.name || "");
+  const code = error.code;
+  if (name === "PasswordException" || code === 1 || code === 2) return true;
+  return /password|encrypt|decrypt/i.test(String(error.message || error));
+}
+
 export function errorMessage(error) {
   if (!error) return "Something went wrong. Please try again.";
-  const message = String(error.message || error);
-  if (/password/i.test(message)) {
+  const message = String(error.message || "") || String(error);
+  if (isPasswordError(error)) {
     return "This PDF is password-protected. Add the correct password and try again.";
   }
   if (/encrypted/i.test(message)) {

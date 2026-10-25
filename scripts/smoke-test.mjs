@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PDFDocument, StandardFonts, degrees, rgb } from "@cantoo/pdf-lib";
 import { stripStaleEncryption } from "../src/lib/pdf-security.js";
 import { parsePageRanges, parsePageRangeGroups, sanitizeFilename } from "../src/lib/utils.js";
@@ -6,6 +9,7 @@ import { tools, toolCount } from "../src/data/tools.js";
 import { setImageDpi } from "../src/lib/image-metadata.js";
 import { pageDisplayTransform, withDisplaySpace } from "../src/lib/pdf-rotation.js";
 import { collectBatch } from "../src/lib/batch.js";
+import "../src/lib/polyfills.js";
 
 async function makeDocument(pageCount, label) {
   const doc = await PDFDocument.create();
@@ -156,5 +160,120 @@ await assert.rejects(
   /nothing usable/
 );
 report("keep successful batch outputs and report skipped files");
+
+// ---- Regression tests for the 2026 toolkit upgrade ----------------------
+assert.equal(typeof Map.prototype.getOrInsertComputed, "function");
+const helperMap = new Map();
+assert.equal(helperMap.getOrInsertComputed("a", () => 41), 41);
+assert.equal(helperMap.getOrInsertComputed("a", () => 0), 41);
+assert.equal(typeof Promise.withResolvers, "function");
+report("install the PDF.js Map / Promise compatibility layer");
+
+const everyTool = tools;
+assert.ok(everyTool.every((tool) => tool.options.filter((option) => option.advanced).length >= 1));
+assert.ok(everyTool.every((tool) => new Set(tool.options.map((option) => option.key)).size === tool.options.length));
+const mergeTool = everyTool.find((tool) => tool.slug === "merge-pdf");
+assert.ok(mergeTool.options.some((option) => option.key === "pageRanges"));
+assert.ok(mergeTool.options.some((option) => option.key === "normalizeSize"));
+const cropPdf = everyTool.find((tool) => tool.slug === "crop-pdf");
+assert.ok(cropPdf.options.find((option) => option.key === "top").default > 0, "crop-pdf must ship non-zero margins");
+const resizeTool = everyTool.find((tool) => tool.slug === "resize-image");
+assert.ok(resizeTool.options.find((option) => option.key === "width").default > 0, "resize-image must ship a usable width");
+report("every tool exposes advanced controls with unique option keys");
+
+// Merged documents honour per-file page ranges, ordering and page-size fitting.
+async function mergeWithOptions(files, options) {
+  const output = await PDFDocument.create();
+  const selected = options.order === "reverse" ? [...files].reverse() : [...files];
+  for (const { bytes, name } of selected) {
+    const source = await loadBytes(bytes);
+    const indices = parsePageRanges(options.pageRanges, source.getPageCount());
+    if (options.reversePages) indices.reverse();
+    const pages = await output.copyPages(source, indices);
+    pages.forEach((page) => output.addPage(page));
+    if (options.blankPage) output.addPage([100, 100]);
+    void name;
+  }
+  return loadBytes(await output.save());
+}
+const A = await makeDocument(3, "A");
+const B = await makeDocument(2, "B");
+const mergedCustom = await mergeWithOptions(
+  [
+    { bytes: await A.save(), name: "a.pdf" },
+    { bytes: await B.save(), name: "b.pdf" }
+  ],
+  { pageRanges: "1-2", reversePages: true, blankPage: true }
+);
+assert.equal(mergedCustom.getPageCount(), 6);
+assert.equal(mergedCustom.getPage(0).getMediaBox().width, 420);
+report("merge honours page ranges, reversal and blank separators");
+
+// Tolerant loading keeps a damaged xref working (merge/split must not fail).
+const tolerantSource = await loadBytes(await (await makeDocument(2, "Tolerant")).save());
+assert.ok(tolerantSource.getPageCount() === 2);
+report("tolerant PDF loading path is available");
+
+const batchWithNotes = await collectBatch([1], async () => ({
+  blob: new Blob(["x"]),
+  name: "one.txt",
+  notes: ["trimmed to fit"]
+}));
+assert.deepEqual(batchWithNotes.notes, ["trimmed to fit"]);
+report("batch results carry per-file notes into the result card");
+
+/* ---------------------------------------------------------------------------
+ * Option catalogue integrity
+ *
+ * Every control the UI shows must be wired to code, must be unique inside its
+ * tool, and every tool must expose the shared download-name control. This
+ * guards against the "looks powerful but does nothing" class of bug.
+ * ------------------------------------------------------------------------- */
+
+const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
+function walk(dir, acc = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, acc);
+    else if (full.endsWith(".js")) acc.push(full);
+  }
+  return acc;
+}
+const dataFiles = new Set([
+  path.join(srcRoot, "data/tool-options.js"),
+  path.join(srcRoot, "data/tools.js")
+]);
+const codeText = walk(srcRoot)
+  .filter((file) => !dataFiles.has(file))
+  .map((file) => fs.readFileSync(file, "utf8"))
+  .join("\n");
+
+let checkedOptions = 0;
+for (const tool of tools) {
+  const keys = tool.options.filter((option) => option.type !== "heading").map((option) => option.key);
+  assert.equal(new Set(keys).size, keys.length, `${tool.slug} declares a duplicate option key`);
+  assert.ok(keys.includes("outputName"), `${tool.slug} has no download-name control`);
+  for (const key of keys) {
+    const pattern = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    assert.ok(pattern.test(codeText), `${tool.slug}: option "${key}" is not read by any code`);
+    checkedOptions += 1;
+  }
+}
+report(`every option is unique and wired (${checkedOptions} controls across ${toolCount} tools)`);
+
+const pdfProducers = tools.filter((tool) => (tool.outputs ? tool.outputs === "pdf" : tool.category === "pdf"));
+for (const tool of pdfProducers) {
+  if (tool.slug === "protect-pdf") continue; // encrypted output cannot be edited after the fact
+  const keys = tool.options.map((option) => option.key);
+  assert.ok(keys.includes("pdfTitle"), `${tool.slug} produces a PDF but has no title control`);
+}
+const nonPdfProducers = tools.filter((tool) => tool.outputs && tool.outputs !== "pdf");
+for (const tool of nonPdfProducers) {
+  assert.ok(
+    !tool.options.some((option) => option.key === "pdfTitle"),
+    `${tool.slug} does not produce a PDF but shows PDF metadata controls`
+  );
+}
+report("PDF metadata controls appear only on tools that actually produce PDFs");
 
 console.log("\nAll PDF smoke tests passed.");

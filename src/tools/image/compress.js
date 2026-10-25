@@ -10,6 +10,8 @@ export default {
           progress?.((index + fraction) / files.length, `Compressing ${file.name}…`)
       });
     });
+    const kept = outputs.filter((output) => output.originalKept);
+    outputs.notes = kept.map((output) => `${output.name} was already smaller — the original was kept.`);
     progress?.(1, "Done");
     return outputs;
   }

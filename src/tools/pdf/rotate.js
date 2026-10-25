@@ -8,11 +8,18 @@ export default {
       const file = files[index];
       progress?.((index / files.length) * 0.9, `Rotating ${file.name}…`);
       const doc = await openPdf(file, options.password);
-      const pages = parsePageRanges(options.pages, doc.getPageCount());
-      const angle = Number(options.angle) || 90;
-      pages.forEach((pageIndex) => {
+      let pages = parsePageRanges(options.pages, doc.getPageCount());
+      const custom = Number(options.customAngle) || 0;
+      let angle = custom || Number(options.angle) || 90;
+      if (options.snapTo90 !== false && Math.abs(custom) > 0) angle = Math.round(angle / 90) * 90;
+      if (options.scope === "odd") pages = pages.filter((page) => (page + 1) % 2 === 1);
+      if (options.scope === "even") pages = pages.filter((page) => (page + 1) % 2 === 0);
+      pages.forEach((pageIndex, position) => {
         const page = doc.getPage(pageIndex);
-        page.setRotation(degrees((page.getRotation().angle + angle) % 360));
+        const current = page.getRotation().angle;
+        const direction = options.alternate && position % 2 === 1 ? -angle : angle;
+        const next = options.mode === "absolute" ? angle : current + direction;
+        page.setRotation(degrees(((next % 360) + 360) % 360));
       });
       const bytes = await savePdf(doc);
       outputs.push({

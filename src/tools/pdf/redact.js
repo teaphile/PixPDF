@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   PDFDocument,
   openPdf,
@@ -26,12 +27,14 @@ export default {
     let currentPage = 0;
     let boxes = [];
     let busy = false;
+    let advanced = null;
     let drawing = false;
     let start = null;
     let draft = null;
     let lastViewport = null;
     let previewCanvas = null;
     let overlay = null;
+    let overlayBound = null;
 
     const renderInitial = () => {
       root.innerHTML = `<div class="workspace-card">
@@ -149,9 +152,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
       updateSummary();
     };
 
@@ -164,6 +169,8 @@ export default {
       lastViewport = viewport;
       previewCanvas = root.querySelector("[data-redact-preview]");
       overlay = root.querySelector("[data-redact-overlay]");
+      overlayBound = null;
+      bindOverlay();
       previewCanvas.width = Math.max(1, Math.round(viewport.width));
       previewCanvas.height = Math.max(1, Math.round(viewport.height));
       overlay.width = previewCanvas.width;
@@ -232,6 +239,8 @@ export default {
     };
 
     const bindOverlay = () => {
+      if (!overlay || overlayBound === overlay) return;
+      overlayBound = overlay;
       overlay.addEventListener("pointerdown", (event) => {
         event.preventDefault();
         overlay.setPointerCapture(event.pointerId);
@@ -365,19 +374,33 @@ export default {
             outputDoc.addPage(copied[0]);
             continue;
           }
+          const extra = advanced?.values || {};
           const page = await doc.getPage(index + 1);
-          const { canvas, viewport } = await renderPageToCanvas(page, 1.8, "#ffffff");
+          const dpi = Number(extra.rebuildDpi) || 150;
+          const { canvas, viewport } = await renderPageToCanvas(page, dpi / 72, "#ffffff");
           const context = canvas.getContext("2d");
-          context.fillStyle = "#000000";
+          const boxColor = extra.redactColor || "#000000";
+          const expand = (Number(extra.redactExpand) || 0) * (dpi / 72);
           boxes[index].forEach((box) => {
-            const paddingX = canvas.width * 0.002;
-            const paddingY = canvas.height * 0.002;
+            const paddingX = Math.max(1, canvas.width * 0.002 - expand);
+            const paddingY = Math.max(1, canvas.height * 0.002 - expand);
+            context.fillStyle = boxColor;
             context.fillRect(
               box.x * canvas.width - paddingX,
               box.y * canvas.height - paddingY,
               box.w * canvas.width + paddingX * 2,
               box.h * canvas.height + paddingY * 2
             );
+            if (extra.redactBorder) {
+              context.strokeStyle = "rgba(255,60,60,0.9)";
+              context.lineWidth = Math.max(1, dpi / 200);
+              context.strokeRect(
+                box.x * canvas.width - paddingX,
+                box.y * canvas.height - paddingY,
+                box.w * canvas.width + paddingX * 2,
+                box.h * canvas.height + paddingY * 2
+              );
+            }
           });
           const jpegBlob = await canvasToBlob(canvas, "image/jpeg", 0.92);
           const image = await outputDoc.embedJpg(await jpegBlob.arrayBuffer());
@@ -392,7 +415,7 @@ export default {
         renderResult(
           root.querySelector("[data-result]"),
           [{ blob, name: `${sanitizeFilename(file.name, "document")}-redacted.pdf` }],
-          { tool, inputs: file.size, duration: performance.now() - started }
+          { tool, inputs: file.size, duration: performance.now() - started, outputOptions: advanced?.values }
         );
       } catch (error) {
         console.error(error);

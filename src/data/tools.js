@@ -1,6 +1,7 @@
 import { newTools } from "./tool-additions.js";
+import { commonOptions, extraOptions, patchedDefaults } from "./tool-options.js";
 
-export const tools = [
+const baseTools = [
   {
     slug: "merge-pdf",
     name: "Merge PDF",
@@ -108,9 +109,12 @@ export const tools = [
         type: "select",
         default: "150",
         choices: [
-          { value: "110", label: "110 DPI — smallest" },
+          { value: "72", label: "72 DPI — screen / smallest" },
+          { value: "96", label: "96 DPI — light" },
+          { value: "120", label: "120 DPI — compact" },
           { value: "150", label: "150 DPI — balanced" },
           { value: "200", label: "200 DPI — sharper" },
+          { value: "240", label: "240 DPI — high" },
           { value: "300", label: "300 DPI — print" }
         ],
         showIf: { key: "mode", equals: "strong" }
@@ -122,6 +126,10 @@ export const tools = [
         default: 0.7,
         min: 0.3,
         max: 0.95,
+        showIf: [
+          { key: "mode", equals: "strong" },
+          { key: "imageFormat", equals: "jpg" }
+        ],
         step: 0.05,
         format: (v) => `${Math.round(v * 100)}%`,
         showIf: { key: "mode", equals: "strong" }
@@ -135,6 +143,7 @@ export const tools = [
   },
   {
     slug: "pdf-to-jpg",
+    outputs: "images",
     name: "PDF to JPG",
     category: "pdf",
     icon: "Images",
@@ -730,6 +739,7 @@ export const tools = [
   },
   {
     slug: "pdf-to-text",
+    outputs: "text",
     name: "PDF to Text",
     category: "pdf",
     icon: "FileText",
@@ -1170,6 +1180,7 @@ export const tools = [
     slug: "image-to-pdf",
     name: "Image to PDF",
     category: "image",
+    outputs: "pdf",
     icon: "FileImage",
     tone: "violet",
     short: "Turn one or many images into a neat, print-ready PDF.",
@@ -1235,6 +1246,25 @@ export const tools = [
   },
   ...newTools
 ];
+
+/**
+ * Compose every tool with its extra manual controls. Keeping this in one
+ * place guarantees that a new tool automatically inherits the shared output
+ * settings, and that the option keys a tool receives always match the ones
+ * its implementation reads.
+ */
+export const tools = baseTools.map((tool) => {
+  const own = (tool.options || []).map((option) => ({
+    ...option,
+    ...(patchedDefaults[tool.slug]?.[option.key] !== undefined
+      ? { default: patchedDefaults[tool.slug][option.key] }
+      : {})
+  }));
+  return {
+    ...tool,
+    options: [...own, ...(extraOptions[tool.slug] || []), ...commonOptions(tool)]
+  };
+});
 
 export const categories = [
   {

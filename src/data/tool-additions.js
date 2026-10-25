@@ -69,6 +69,7 @@ export const newTools = [
   },
   {
     slug: "compare-pdf",
+    outputs: "html",
     name: "Compare PDF",
     category: "pdf",
     icon: "Files",
@@ -91,6 +92,7 @@ export const newTools = [
   },
   {
     slug: "pdf-to-markdown",
+    outputs: "markdown",
     name: "PDF to Markdown",
     category: "pdf",
     icon: "FileOutput",

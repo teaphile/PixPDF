@@ -12,6 +12,7 @@ import {
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   canvasToBlob,
   errorMessage,
@@ -40,6 +41,7 @@ export default {
     let history = [];
     let suppressSync = false;
     let busy = false;
+    let advanced = null;
 
     const renderInitial = () => {
       root.innerHTML = `<div class="workspace-card">
@@ -181,9 +183,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
     };
 
     const setupCanvas = async () => {
@@ -430,7 +434,9 @@ export default {
       button.disabled = true;
       button.innerHTML = `${icon("LoaderCircle", { size: 18, className: "spin" })} Exporting…`;
       try {
-        const multiplier = Math.min(4, loaded.width / canvasWidth);
+        const extra = advanced?.values || {};
+        const scale = Math.max(25, Math.min(200, Number(extra.exportScale) || 100)) / 100;
+        const multiplier = Math.min(4, (loaded.width * scale) / canvasWidth);
         const overlayUrl = canvas.toDataURL({ format: "png", multiplier });
         const overlay = await new Promise((resolve, reject) => {
           const image = new Image();
@@ -438,10 +444,10 @@ export default {
           image.onerror = () => reject(new Error("Could not render annotations."));
           image.src = overlayUrl;
         });
-        const out = makeCanvas(loaded.width, loaded.height);
+        const out = makeCanvas(loaded.width * scale, loaded.height * scale);
         const context = out.getContext("2d");
         if (format === "jpg") {
-          context.fillStyle = "#ffffff";
+          context.fillStyle = extra.exportBackground || "#ffffff";
           context.fillRect(0, 0, out.width, out.height);
         }
         drawSource(context, loaded.source, 0, 0, out.width, out.height);
@@ -450,7 +456,7 @@ export default {
         renderResult(
           root.querySelector("[data-result]"),
           [{ blob, name: `${sanitizeFilename(file.name, "image")}-annotated.${format}` }],
-          { tool, inputs: file.size }
+          { tool, inputs: file.size, outputOptions: advanced?.values }
         );
       } catch (error) {
         toast(errorMessage(error), { type: "error" });

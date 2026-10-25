@@ -1,11 +1,14 @@
-import { openPdfJs } from "./pdf.js";
+import { destroyPdfJs, openPdfJs } from "./pdf.js";
 import { parsePageRanges, sanitizeFilename, yieldToUi } from "./utils.js";
 
-const escapeMd = (text) =>
+const escapeMdDefault = (text) =>
   text
     .replace(/([\\`*_{}[\]()#+.!|>])/g, "\\$1")
     .replace(/\s+/g, " ")
     .trim();
+
+let escapeSpecial = true;
+const escapeMd = (text) => (escapeSpecial ? escapeMdDefault(text) : String(text || "").replace(/\s+/g, " ").trim());
 
 function buildLines(items) {
   const lines = [];
@@ -45,11 +48,15 @@ function median(values) {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-function lineToMarkdown(line, medianSize, headings) {
+function lineToMarkdown(line, medianSize, headings, options = {}) {
   const raw = line.text;
   if (!raw) return "";
-  if (/^[•●▪◦‣·]\s+/.test(raw)) return `- ${escapeMd(raw.replace(/^[•●▪◦‣·]\s+/, ""))}`;
-  if (/^\d+[.)]\s+/.test(raw)) return escapeMd(raw).replace(/^(\d+[.)])\\/, "$1");
+  if (options.bulletLists !== false && /^[•●▪◦‣·]\s+/.test(raw)) {
+    return `- ${escapeMd(raw.replace(/^[•●▪◦‣·]\s+/, ""))}`;
+  }
+  if (options.bulletLists !== false && /^\d+[.)]\s+/.test(raw)) {
+    return escapeMd(raw).replace(/^(\d+[.)])\\/, "$1");
+  }
   if (headings && raw.length < 120) {
     const ratio = line.size / Math.max(medianSize, 1);
     let level = 0;
@@ -57,7 +64,7 @@ function lineToMarkdown(line, medianSize, headings) {
     else if (ratio >= 1.35) level = 2;
     else if (ratio >= 1.15) level = 3;
     if (level) return `${"#".repeat(level)} ${escapeMd(raw)}`;
-    if (raw.length < 70 && raw === raw.toUpperCase() && /[A-Z]/.test(raw)) {
+    if (options.preserveCase !== true && raw.length < 70 && raw === raw.toUpperCase() && /[A-Z]/.test(raw)) {
       return `## ${escapeMd(raw)}`;
     }
   }
@@ -65,11 +72,13 @@ function lineToMarkdown(line, medianSize, headings) {
 }
 
 export async function pdfToMarkdown(file, options, { progress = () => {}, password } = {}) {
+  escapeSpecial = options.escapeSpecial !== false;
   const doc = await openPdfJs(file, password);
   try {
     const total = doc.numPages;
     const pages = parsePageRanges(options.pages, total);
     const sections = [];
+    const title = String(options.title || "").trim();
     for (let index = 0; index < pages.length; index += 1) {
       const pageNumber = pages[index] + 1;
       progress((index / pages.length) * 0.92, `Reading page ${pageNumber} of ${total}…`);
@@ -78,11 +87,14 @@ export async function pdfToMarkdown(file, options, { progress = () => {}, passwo
       const lines = buildLines(content.items);
       const baseSize = median(lines.map((line) => line.size));
       const paragraphs = [];
+      if (options.pageHeadings && pages.length > 1) {
+        paragraphs.push(`## Page ${pageNumber}`);
+      }
       for (const line of lines) {
-        const block = lineToMarkdown(line, baseSize, options.headings !== false);
+        const block = lineToMarkdown(line, baseSize, options.headings !== false, options);
         if (block) paragraphs.push(block);
       }
-      const body = paragraphs.join("\n").trim();
+      const body = paragraphs.join(options.blankLines ? "\n\n" : "\n").trim();
       sections.push(
         options.pageBreaks === false
           ? body
@@ -93,13 +105,15 @@ export async function pdfToMarkdown(file, options, { progress = () => {}, passwo
     }
     progress(1, "Done");
     const base = sanitizeFilename(file.name, "document");
+    const bodyText = sections.join("\n\n").trim();
+    const markdown = `${title ? `# ${title}\n\n` : ""}${bodyText}\n`;
     return {
-      blob: new Blob([sections.join("\n\n").trim() + "\n"], {
+      blob: new Blob([markdown], {
         type: "text/markdown;charset=utf-8"
       }),
       name: `${base}.md`
     };
   } finally {
-    await doc.destroy();
+    await destroyPdfJs(doc);
   }
 }

@@ -11,6 +11,7 @@ import {
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   PDFDocument,
   openPdf,
@@ -39,6 +40,7 @@ export default {
     let history = [];
     let canvas = null;
     let busy = false;
+    let advanced = null;
     let canvasWidth = 0;
     let canvasHeight = 0;
     let bgCache = new Map();
@@ -195,9 +197,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
     };
 
     const getBackground = async (index) => {
@@ -598,7 +602,7 @@ export default {
         renderResult(
           root.querySelector("[data-result]"),
           [{ blob: new Blob([bytes], { type: "application/pdf" }), name: `${sanitizeFilename(file.name, "document")}-edited.pdf` }],
-          { tool, inputs: file.size, duration: performance.now() - started }
+          { tool, inputs: file.size, duration: performance.now() - started, outputOptions: advanced?.values }
         );
         toast(`${edited.length} edited page${edited.length === 1 ? "" : "s"} saved.`, { type: "success" });
       } catch (error) {

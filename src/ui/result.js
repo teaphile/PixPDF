@@ -1,6 +1,7 @@
 import { icon } from "./icons.js";
 import { downloadBlob, escapeHtml, formatBytes, formatDuration } from "../lib/utils.js";
 import { zipOutputs } from "../lib/zip.js";
+import { applyOutputOptions, zipNameFor } from "../lib/output-options.js";
 import { toast } from "./toast.js";
 
 export function normalizeOutputs(result, fallbackName = "result.bin") {
@@ -12,21 +13,27 @@ export function normalizeOutputs(result, fallbackName = "result.bin") {
   throw new Error("The tool returned an unexpected result.");
 }
 
-export function renderResult(
+export async function renderResult(
   container,
-  outputs,
-  { tool, inputs = 0, outputSize, duration = 0, summary, onReset } = {}
+  rawOutputs,
+  { tool, inputs = 0, outputSize, duration = 0, summary, onReset, outputOptions } = {}
 ) {
-  if (!outputs.length) return;
+  if (!rawOutputs.length) return;
+  // Visual tools share the same output controls as the standard workspace.
+  const outputs = outputOptions
+    ? await applyOutputOptions(rawOutputs, outputOptions)
+    : rawOutputs;
   const totalOut = outputSize ?? outputs.reduce((sum, output) => sum + output.blob.size, 0);
   const multiple = outputs.length > 1;
   const savedPercent = inputs > 0 ? Math.round(((inputs - totalOut) / inputs) * 100) : 0;
   const parts = [`${outputs.length} file${outputs.length === 1 ? "" : "s"} ready`];
   if (inputs) parts.push(`${formatBytes(inputs)} → ${formatBytes(totalOut)}`);
   if (savedPercent > 3) parts.push(`${savedPercent}% smaller`);
+  if (savedPercent < -3) parts.push(`${Math.abs(savedPercent)}% larger`);
   if (duration) parts.push(formatDuration(duration));
   if (summary) parts.unshift(summary);
 
+  const notes = [...(outputs.notes || []), ...(outputOptions?.notes || [])].filter(Boolean);
   container.innerHTML = `<div class="result-card is-in" role="status">
     <div class="result-head">
       <span class="result-icon">${icon("Check", { size: 24 })}</span>
@@ -35,6 +42,9 @@ export function renderResult(
         <p>${escapeHtml(parts.join(" · "))}</p>
       </div>
     </div>
+    ${notes.length ? `<div class="result-notes">${notes
+      .map((note) => `<p>${icon("Info", { size: 15 })}<span>${escapeHtml(note)}</span></p>`)
+      .join("")}</div>` : ""}
     <div class="result-actions">
       <button type="button" class="button button-primary" data-dl-primary>
         ${icon("Download", { size: 18 })} ${escapeHtml(
@@ -76,7 +86,7 @@ export function renderResult(
     primary.disabled = true;
     primary.innerHTML = `${icon("LoaderCircle", { size: 17, className: "spin" })} Packing ZIP…`;
     try {
-      const zip = await zipOutputs(outputs, tool?.output || "pixpdf-results.zip");
+      const zip = await zipOutputs(outputs, zipNameFor(outputOptions, tool?.output || "pixpdf-results.zip"));
       downloadBlob(zip.blob, zip.name);
     } catch (error) {
       toast(error.message || "Could not build the ZIP.", { type: "error" });

@@ -8,6 +8,7 @@ import {
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import { openPdf, renderPdfPagePreview, savePdf } from "../../lib/pdf.js";
 import {
   errorMessage,
@@ -38,6 +39,7 @@ export default {
     let values = {};
     let flatten = false;
     let busy = false;
+    let advanced = null;
     let previewUrl = null;
 
     const renderInitial = () => {
@@ -241,9 +243,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
       await renderPage();
     };
 
@@ -396,7 +400,7 @@ export default {
         renderResult(
           root.querySelector("[data-result]"),
           [{ blob, name: `${sanitizeFilename(file.name, "form")}-filled.pdf` }],
-          { tool, inputs: file.size, duration: performance.now() - started }
+          { tool, inputs: file.size, duration: performance.now() - started, outputOptions: advanced?.values }
         );
       } catch (error) {
         toast(errorMessage(error), { type: "error", duration: 7000 });

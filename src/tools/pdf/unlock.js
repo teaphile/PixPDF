@@ -21,6 +21,26 @@ export default {
         }
         throw error;
       }
+      if (options.flattenForms) {
+        try {
+          const form = doc.getForm();
+          if (form.getFields().length) form.flatten();
+        } catch {
+          /* malformed forms can be ignored */
+        }
+      }
+      if (options.keepMetadata === false) {
+        try {
+          doc.setTitle("");
+          doc.setAuthor("");
+          doc.setSubject("");
+          doc.setKeywords([]);
+          doc.setCreator("");
+          doc.setProducer("");
+        } catch {
+          /* metadata is optional */
+        }
+      }
       const bytes = await savePdf(stripStaleEncryption(doc));
       outputs.push({
         blob: new Blob([bytes], { type: "application/pdf" }),

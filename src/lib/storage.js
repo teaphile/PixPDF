@@ -68,3 +68,44 @@ export function addRecent(slug) {
     /* ignore */
   }
 }
+
+const SETTINGS_KEY = "pixpdf-tool-settings-v2";
+
+function readAllSettings() {
+  try {
+    const value = safeJsonParse(localStorage.getItem(SETTINGS_KEY), {});
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+export function getToolSettings(slug) {
+  const value = readAllSettings()[slug];
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+export function saveToolSettings(slug, values) {
+  try {
+    const all = readAllSettings();
+    // Only store JSON-safe primitives; option definitions may contain functions.
+    const clean = {};
+    Object.entries(values || {}).forEach(([key, value]) => {
+      if (["string", "number", "boolean"].includes(typeof value) || value === null) clean[key] = value;
+    });
+    all[slug] = clean;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
+  } catch {
+    /* storage can be unavailable in private mode */
+  }
+}
+
+export function clearToolSettings(slug) {
+  try {
+    const all = readAllSettings();
+    delete all[slug];
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}

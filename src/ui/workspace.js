@@ -2,19 +2,22 @@ import { icon } from "./icons.js";
 import { toast } from "./toast.js";
 import {
   acceptMatches,
+  clamp,
   downloadBlob,
   errorMessage,
   escapeHtml,
   formatBytes,
   formatDuration,
   isImageFile,
+  isPasswordError,
   isPdfFile,
   sanitizeFilename,
   uid,
   yieldToUi
 } from "../lib/utils.js";
 import { zipOutputs } from "../lib/zip.js";
-import { addRecent } from "../lib/storage.js";
+import { applyOutputOptions, zipNameFor } from "../lib/output-options.js";
+import { addRecent, clearToolSettings, getToolSettings, saveToolSettings } from "../lib/storage.js";
 import { takeStashedFiles } from "../lib/stash.js";
 
 const imageExtensions = "JPG, PNG, WebP, GIF, BMP, SVG";
@@ -26,25 +29,49 @@ function releasePreview(entry) {
 function defaultsFor(options = []) {
   const values = {};
   options.forEach((option) => {
-    values[option.key] = option.default;
+    if (option.type !== "heading") values[option.key] = option.default;
   });
   return values;
 }
 
 function shouldShow(condition, values) {
   if (!condition) return true;
+  if (Array.isArray(condition)) return condition.every((item) => shouldShow(item, values));
+  if (Array.isArray(condition.in)) return condition.in.map(String).includes(String(values[condition.key]));
+  if (Array.isArray(condition.notIn)) return !condition.notIn.map(String).includes(String(values[condition.key]));
   if ("equals" in condition) return String(values[condition.key]) === String(condition.equals);
   if ("not" in condition) return String(values[condition.key]) !== String(condition.not);
+  if ("truthy" in condition) return Boolean(values[condition.key]);
   return true;
 }
 
 function parseValue(option, input) {
   if (option.type === "checkbox") return input.checked;
   if (option.type === "number" || option.type === "range") {
-    const value = input.value === "" ? "" : Number(input.value);
-    return value;
+    if (input.value === "") return "";
+    const parsed = Number(input.value);
+    if (!Number.isFinite(parsed)) return option.default;
+    return clamp(parsed, option.min ?? -Infinity, option.max ?? Infinity);
   }
   return input.value;
+}
+
+function sanitiseValues(tool, values) {
+  const result = {};
+  tool.options.forEach((option) => {
+    if (option.type === "heading") return;
+    const value = values[option.key];
+    if (value === undefined || value === null) {
+      result[option.key] = option.default;
+      return;
+    }
+    if ((option.type === "number" || option.type === "range") && typeof value === "number") {
+      result[option.key] = clamp(value, option.min ?? -Infinity, option.max ?? Infinity);
+    } else {
+      result[option.key] = value;
+    }
+  });
+  return result;
 }
 
 export class GenericWorkspace {
@@ -52,7 +79,7 @@ export class GenericWorkspace {
     this.tool = tool;
     this.implementation = implementation;
     this.root = root;
-    this.values = defaultsFor(tool.options);
+    this.values = sanitiseValues(tool, { ...defaultsFor(tool.options), ...getToolSettings(tool.slug) });
     this.files = [];
     this.dragIndex = null;
     this.busy = false;
@@ -98,6 +125,13 @@ export class GenericWorkspace {
                    <button type="button" class="text-button" data-reset-options>${icon("RotateCcw", { size: 14 })} Reset</button>
                  </div>
                  <div class="option-grid" data-option-grid></div>
+                 <details class="advanced-panel" data-advanced-wrap hidden>
+                   <summary>${icon("SlidersHorizontal", { size: 16 })}<span>Output, metadata & security</span><em data-advanced-count></em>${icon(
+                     "ChevronDown",
+                     { size: 16, className: "advanced-chevron" }
+                   )}</summary>
+                   <div class="custom-options" data-advanced-grid></div>
+                 </details>
                </div>`
             : ""
         }
@@ -132,6 +166,8 @@ export class GenericWorkspace {
     this.sizeEl = this.root.querySelector("[data-file-size]");
     this.optionsEl = this.root.querySelector("[data-options]");
     this.optionGrid = this.root.querySelector("[data-option-grid]");
+    this.advancedWrap = this.root.querySelector("[data-advanced-wrap]");
+    this.advancedGrid = this.root.querySelector("[data-advanced-grid]");
     this.runButton = this.root.querySelector("[data-run]");
     this.resultEl = this.root.querySelector("[data-result]");
     this.progressEl = this.root.querySelector("[data-progress]");
@@ -157,7 +193,9 @@ export class GenericWorkspace {
     this.root.querySelector("[data-clear-all]")?.addEventListener("click", () => this.clearAll());
     this.root.querySelector("[data-reset-options]")?.addEventListener("click", () => {
       this.values = defaultsFor(this.tool.options);
+      clearToolSettings(this.tool.slug);
       this.renderOptions();
+      toast("Settings reset to defaults.", { type: "info", duration: 2200 });
     });
 
     addRecent(this.tool.slug);
@@ -261,6 +299,7 @@ export class GenericWorkspace {
       const option = this.tool.options.find((item) => item.key === key);
       if (!option) return;
       this.values[key] = parseValue(option, input);
+      saveToolSettings(this.tool.slug, this.values);
       if (option.type === "range") {
         const valueEl = this.optionGrid.querySelector(`[data-range-value="${key}"]`);
         if (valueEl) valueEl.textContent = option.format ? option.format(this.values[key]) : this.values[key];
@@ -269,23 +308,47 @@ export class GenericWorkspace {
     };
     this.optionGrid.addEventListener("input", handle);
     this.optionGrid.addEventListener("change", handle);
+    this.advancedGrid?.addEventListener("input", handle);
+    this.advancedGrid?.addEventListener("change", handle);
   }
 
   renderOptions() {
     if (!this.optionGrid) return;
-    this.optionGrid.innerHTML = this.tool.options
-      .map((option) => this.renderOption(option))
-      .join("");
+    const primary = this.tool.options.filter((option) => !option.advanced);
+    const advanced = this.tool.options.filter((option) => option.advanced);
+    this.optionGrid.innerHTML = primary.map((option) => this.renderOption(option)).join("");
+    if (this.advancedWrap && this.advancedGrid) {
+      this.advancedWrap.hidden = advanced.length === 0;
+      this.advancedGrid.innerHTML = advanced.map((option) => this.renderOption(option)).join("");
+      const count = this.advancedWrap.querySelector("[data-advanced-count]");
+      if (count) count.textContent = `${advanced.filter((option) => option.type !== "heading").length} controls`;
+    }
     this.updateOptionVisibility();
   }
 
   renderOption(option) {
     const value = this.values[option.key];
-    const wide = ["text", "range", "color", "checkbox"].includes(option.type);
+    const wide = ["text", "textarea", "range", "color", "checkbox", "chips", "heading"].includes(option.type);
     const label = `<label class="field-label" for="opt-${escapeHtml(option.key)}">${escapeHtml(option.label)}</label>`;
     const help = option.help
       ? `<p class="field-help">${escapeHtml(option.help)}</p>`
       : "";
+
+    if (option.type === "heading") {
+      return `<div class="field field-wide field-heading" data-field="${escapeHtml(option.key)}"><span>${escapeHtml(
+        option.label
+      )}</span></div>`;
+    }
+
+    if (option.type === "textarea") {
+      return `<div class="field field-wide" data-field="${escapeHtml(option.key)}">
+        ${label}
+        <textarea id="opt-${escapeHtml(option.key)}" class="input textarea-input" rows="${option.rows || 2}" placeholder="${escapeHtml(
+          option.placeholder || ""
+        )}" data-option="${escapeHtml(option.key)}">${escapeHtml(value ?? "")}</textarea>
+        ${help}
+      </div>`;
+    }
 
     if (option.type === "select") {
       return `<div class="field ${wide ? "field-wide" : ""}" data-field="${escapeHtml(option.key)}">
@@ -307,10 +370,10 @@ export class GenericWorkspace {
       </div>`;
     }
 
-    if (option.type === "choice") {
+    if (option.type === "choice" || option.type === "chips") {
       return `<div class="field ${wide ? "field-wide" : ""}" data-field="${escapeHtml(option.key)}">
         <span class="field-label">${escapeHtml(option.label)}</span>
-        <div class="choice-group" role="radiogroup" aria-label="${escapeHtml(option.label)}">
+        <div class="choice-group ${option.type === "chips" ? "choice-chips" : ""}" role="radiogroup" aria-label="${escapeHtml(option.label)}">
           ${option.choices
             .map(
               (choice) => `<label class="choice">
@@ -345,11 +408,11 @@ export class GenericWorkspace {
     if (option.type === "number") {
       return `<div class="field" data-field="${escapeHtml(option.key)}">
         ${label}
-        <input id="opt-${escapeHtml(option.key)}" class="input" type="number" value="${escapeHtml(
+        <div class="input-with-suffix"><input id="opt-${escapeHtml(option.key)}" class="input" type="number" value="${escapeHtml(
           value
         )}" min="${option.min ?? ""}" max="${option.max ?? ""}" step="${option.step || 1}" placeholder="${escapeHtml(
           option.placeholder || ""
-        )}" data-option="${escapeHtml(option.key)}" />
+        )}" data-option="${escapeHtml(option.key)}" />${option.suffix ? `<span class="input-suffix">${escapeHtml(option.suffix)}</span>` : ""}</div>
         ${help}
       </div>`;
     }
@@ -394,17 +457,19 @@ export class GenericWorkspace {
 
   updateOptionVisibility() {
     if (!this.optionGrid) return;
+    const containers = [this.optionGrid, this.advancedGrid].filter(Boolean);
     this.tool.options.forEach((option) => {
-      const field = this.optionGrid.querySelector(`[data-field="${option.key}"]`);
-      if (!field) return;
-      field.hidden = !shouldShow(option.showIf, this.values);
+      containers.forEach((container) => {
+        const field = container.querySelector(`[data-field="${option.key}"]`);
+        if (field) field.hidden = !shouldShow(option.showIf, this.values);
+      });
     });
-    this.optionGrid.querySelectorAll("[data-option]").forEach((input) => {
+    containers.forEach((container) => container.querySelectorAll("[data-option]").forEach((input) => {
       if (input.type === "color") {
         const hex = input.closest(".field-color")?.querySelector(".color-hex");
         if (hex) hex.textContent = input.value;
       }
-    });
+    }));
   }
 
   async addFiles(fileList, { fromStash = false } = {}) {
@@ -422,7 +487,9 @@ export class GenericWorkspace {
         rejected += 1;
         continue;
       }
-      if (this.files.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) {
+      // Only single-file tools deduplicate. Multi-file tools (merge, join,
+      // batch converters) legitimately need the same file more than once.
+      if (!this.tool.multiple && this.files.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) {
         continue;
       }
       if (!this.tool.multiple && this.files.length >= 1) {
@@ -575,7 +642,11 @@ export class GenericWorkspace {
 
   async run() {
     if (this.busy || !this.files.length) return;
-    if (this.values.password !== undefined && !this.values.password && this.tool.slug === "protect-pdf") {
+    if (
+      this.tool.slug === "protect-pdf" &&
+      !this.values.password &&
+      this.values.generatePassword === false
+    ) {
       toast("Choose a password before protecting your PDF.", { type: "error" });
       this.optionGrid?.querySelector('[data-option="password"]')?.focus();
       return;
@@ -594,8 +665,10 @@ export class GenericWorkspace {
         tool: this.tool
       });
       await yieldToUi();
-      const outputs = normalizeOutputs(result, this.tool);
-      if (!outputs.length) throw new Error("Nothing was produced. Please try again.");
+      const normalized = normalizeOutputs(result, this.tool);
+      if (!normalized.length) throw new Error("Nothing was produced. Please try again.");
+      this.setProgress(0.98, "Applying output settings…");
+      const outputs = await applyOutputOptions(normalized, this.values);
       const outputSize = outputs.reduce((sum, output) => sum + output.blob.size, 0);
       this.setProgress(1, "Finished");
       this.showResult(outputs, {
@@ -603,7 +676,9 @@ export class GenericWorkspace {
         outputSize,
         duration: performance.now() - started,
         fileCount: files.length,
-        warnings: Array.isArray(outputs.warnings) ? outputs.warnings : []
+        warnings: Array.isArray(outputs.warnings) ? outputs.warnings : [],
+        notes: Array.isArray(outputs.notes) ? outputs.notes : [],
+        outputOptions: this.values
       });
       this.progressEl.hidden = true;
     } catch (error) {
@@ -614,7 +689,7 @@ export class GenericWorkspace {
         this.tool.category === "pdf" &&
         !["unlock-pdf", "protect-pdf"].includes(this.tool.slug) &&
         !this.values.password &&
-        /password|encrypted|decrypt/i.test(String(error?.message || ""));
+        isPasswordError(error);
       if (needsPassword) {
         this.showPasswordPrompt(message);
       } else {
@@ -685,6 +760,9 @@ export class GenericWorkspace {
         </div>
       </div>
       ${warningsMarkup(meta.warnings)}
+      ${(meta.notes || []).length ? `<div class="result-notes">${meta.notes
+        .map((note) => `<p>${icon("Info", { size: 15 })}<span>${escapeHtml(note)}</span></p>`)
+        .join("")}</div>` : ""}
       <div class="result-actions">
         <button type="button" class="button button-primary" data-download-primary>
           ${icon("Download", { size: 18 })} ${escapeHtml(primaryName)}
@@ -736,7 +814,7 @@ export class GenericWorkspace {
         const previous = button.innerHTML;
         button.innerHTML = `${icon("LoaderCircle", { size: 17, className: "spin" })} Packing ZIP…`;
         try {
-          const zip = await zipOutputs(outputs, this.tool.output);
+          const zip = await zipOutputs(outputs, zipNameFor(meta.outputOptions, this.tool.output));
           downloadBlob(zip.blob, zip.name);
         } catch (error) {
           toast(errorMessage(error), { type: "error" });
@@ -773,25 +851,35 @@ function warningsMarkup(warnings = []) {
 }
 
 function normalizeOutputs(result, tool) {
-  if (!result) return [];
-  if (result instanceof Blob) {
-    return [{ blob: result, name: tool.output }];
-  }
-  if (typeof result === "string") {
-    return [{ blob: new Blob([result], { type: "text/plain" }), name: tool.output }];
-  }
-  if (result.text !== undefined) {
-    return [
+  let outputs;
+  if (!result) outputs = [];
+  else if (result instanceof Blob) outputs = [{ blob: result, name: tool.output }];
+  else if (typeof result === "string") outputs = [{ blob: new Blob([result], { type: "text/plain" }), name: tool.output }];
+  else if (result.text !== undefined) {
+    outputs = [
       {
         blob: new Blob([result.text], { type: "text/plain;charset=utf-8" }),
         name: result.name || tool.output
       }
     ];
-  }
-  if (result.blob) return [result];
-  if (result.outputs) return result.outputs;
-  if (Array.isArray(result)) return result;
-  throw new Error("The tool returned an unexpected result.");
+  } else if (result.blob) outputs = [result];
+  else if (result.outputs) outputs = result.outputs;
+  else if (Array.isArray(result)) outputs = result;
+  else throw new Error("The tool returned an unexpected result.");
+  const warnings = Array.isArray(result?.warnings)
+    ? result.warnings
+    : Array.isArray(outputs.warnings)
+      ? outputs.warnings
+      : [];
+  const notes = Array.isArray(result?.notes)
+    ? result.notes
+    : Array.isArray(outputs.notes)
+      ? outputs.notes
+      : [];
+  outputs = [...outputs];
+  outputs.warnings = warnings;
+  outputs.notes = notes;
+  return outputs;
 }
 
 export function mountCustomWorkspace(root, html) {

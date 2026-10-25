@@ -1,3 +1,5 @@
+// Must be the first import: PDF.js relies on newer Map helpers at render time.
+import "./lib/polyfills.js";
 import "@fontsource-variable/plus-jakarta-sans";
 import "./styles/main.css";
 

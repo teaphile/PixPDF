@@ -62,7 +62,9 @@ export async function renderToolPage(main, tool, implementation) {
                 <li><span>1</span><div><strong>Add your file${tool.multiple ? "s" : ""}</strong><p>Drop ${escapeHtml(
                   accepts
                 )} into the workspace or browse your device.</p></div></li>
-                <li><span>2</span><div><strong>Set your options</strong><p>Use the ready-made defaults or fine-tune the result.</p></div></li>
+                <li><span>2</span><div><strong>Set your options</strong><p>${escapeHtml(
+                  `${tool.options.filter((option) => option.type !== "heading" && !option.advanced).length} quick controls`
+                )} plus an “Output, metadata & security” panel for exact sizes, formats and PDF properties.</p></div></li>
                 <li><span>3</span><div><strong>Download</strong><p>Your new file is created locally and saved straight to your device.</p></div></li>
               </ol>
             </article>

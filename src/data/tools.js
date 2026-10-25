@@ -1,6 +1,7 @@
 import { newTools } from "./tool-additions.js";
+import { commonOptions, extraOptions, patchedDefaults } from "./tool-options.js";
 
-export const tools = [
+const baseTools = [
   {
     slug: "merge-pdf",
     name: "Merge PDF",
@@ -1235,6 +1236,25 @@ export const tools = [
   },
   ...newTools
 ];
+
+/**
+ * Compose every tool with its extra manual controls. Keeping this in one
+ * place guarantees that a new tool automatically inherits the shared output
+ * settings, and that the option keys a tool receives always match the ones
+ * its implementation reads.
+ */
+export const tools = baseTools.map((tool) => {
+  const own = (tool.options || []).map((option) => ({
+    ...option,
+    ...(patchedDefaults[tool.slug]?.[option.key] !== undefined
+      ? { default: patchedDefaults[tool.slug][option.key] }
+      : {})
+  }));
+  return {
+    ...tool,
+    options: [...own, ...(extraOptions[tool.slug] || []), ...commonOptions(tool)]
+  };
+});
 
 export const categories = [
   {

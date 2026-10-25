@@ -1,13 +1,19 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, createProgress, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
+  A4,
+  LETTER,
   PDFDocument,
+  copyPdfMetadata,
   degrees,
+  fitPageToSize,
   openPdf,
   openPdfJs,
   renderPageToCanvas,
-  savePdf
+  savePdf,
+  destroyPdfJs,
 } from "../../lib/pdf.js";
 import {
   errorMessage,
@@ -25,6 +31,7 @@ export default {
     let pages = [];
     let totalPages = 0;
     let busy = false;
+    let advanced = null;
     let dragIndex = null;
     let progress = null;
 
@@ -86,7 +93,7 @@ export default {
           page.cleanup();
           await yieldToUi();
         }
-        await doc.destroy();
+        await destroyPdfJs(doc);
         progress.set(1, "Ready");
         renderWorkspace();
       } catch (error) {
@@ -146,10 +153,12 @@ export default {
           })} ${escapeHtml(tool.action)}</button>
           <p class="run-note">${icon("ShieldCheck", { size: 14 })} Changes are written to a new PDF — your original stays untouched.</p>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       progress = null;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
       renderPages();
       root.scrollIntoView({ behavior: "smooth", block: "start" });
     };
@@ -334,21 +343,47 @@ export default {
       const resultEl = root.querySelector("[data-result]");
       const started = performance.now();
       try {
+        const extra = advanced?.values || {};
         const doc = await openPdf(file);
+        if (extra.flattenForms) {
+          try {
+            const form = doc.getForm();
+            if (form.getFields().length) form.flatten();
+          } catch {
+            /* malformed forms can be ignored */
+          }
+        }
         const output = await PDFDocument.create();
+        if (extra.preserveMetadata !== false) copyPdfMetadata(doc, output);
         const indices = pages.map((page) => page.original);
         const copied = await output.copyPages(doc, indices);
+        const firstBox = copied[0]?.getMediaBox();
+        const targetSize =
+          extra.normalizeSize === "a4"
+            ? A4
+            : extra.normalizeSize === "letter"
+              ? LETTER
+              : extra.normalizeSize === "first" && firstBox
+                ? { width: firstBox.width, height: firstBox.height }
+                : null;
+        const blankEvery = Math.max(0, Number(extra.blankEvery) || 0);
         copied.forEach((outputPage, index) => {
           outputPage.setRotation(
             degrees((outputPage.getRotation().angle + pages[index].rotation) % 360)
           );
+          if (targetSize) fitPageToSize(outputPage, targetSize);
           output.addPage(outputPage);
+          if (blankEvery > 0 && (index + 1) % blankEvery === 0 && index !== copied.length - 1) {
+            const box = outputPage.getMediaBox();
+            output.addPage([box.width, box.height]);
+          }
         });
         const bytes = await savePdf(output);
         const blob = new Blob([bytes], { type: "application/pdf" });
         const name = `${sanitizeFilename(file.name, "document")}-organized.pdf`;
         renderResult(resultEl, [{ blob, name }], {
           tool,
+          outputOptions: advanced?.values,
           inputs: file.size,
           duration: performance.now() - started,
           onReset: () => {

@@ -1,13 +1,17 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, createProgress, dropzoneMarkup } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   openPdfJs,
-  renderPdfPagePreview
+  renderPageToCanvas,
+  renderPdfPagePreview,
+  destroyPdfJs,
 } from "../../lib/pdf.js";
 import {
   downloadBlob,
   errorMessage,
+  isPasswordError,
   escapeHtml,
   formatBytes,
   isPdfFile,
@@ -15,7 +19,56 @@ import {
   yieldToUi
 } from "../../lib/utils.js";
 
-const tokenize = (text) => String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+let compareOptions = {};
+
+const normaliseText = (text) => {
+  let value = String(text || "");
+  if (compareOptions.ignoreWhitespace !== false) value = value.replace(/\s+/g, " ").trim();
+  if (compareOptions.ignoreCase) value = value.toLowerCase();
+  return value;
+};
+
+const tokenize = (text) => normaliseText(text).split(" ").filter(Boolean);
+
+/**
+ * Compare two rendered pages as tiny grayscale signatures. This is the only
+ * way to compare scanned documents that have no text layer at all.
+ */
+async function signatureOf(doc, pageNumber) {
+  const page = await doc.getPage(pageNumber);
+  try {
+    const viewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(0.6, 140 / Math.max(1, viewport.width));
+    const { canvas } = await renderPageToCanvas(page, scale, "#ffffff");
+    const sample = document.createElement("canvas");
+    sample.width = 32;
+    sample.height = 32;
+    const context = sample.getContext("2d");
+    context.drawImage(canvas, 0, 0, 32, 32);
+    canvas.width = 1;
+    canvas.height = 1;
+    const { data } = context.getImageData(0, 0, 32, 32);
+    const gray = new Uint8Array(32 * 32);
+    for (let index = 0; index < gray.length; index += 1) {
+      const offset = index * 4;
+      gray[index] = Math.round(
+        data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114
+      );
+    }
+    return gray;
+  } finally {
+    page.cleanup();
+  }
+}
+
+function pixelDifference(a, b) {
+  if (!a || !b) return a || b ? 1 : 0;
+  let total = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    total += Math.abs(a[index] - b[index]);
+  }
+  return total / (a.length * 255);
+}
 
 function diffWords(aText, bText) {
   const a = tokenize(aText);
@@ -96,6 +149,13 @@ export default {
     let diffs = [];
     let previews = new Map();
     let busy = false;
+    let advanced = null;
+    let pixelDiffs = [];
+    let pageSignaturesA = [];
+    let pageSignaturesB = [];
+    let hasTextLayer = true;
+    let compareMode = "auto";
+    let password = "";
 
     const renderInitial = () => {
       root.innerHTML = `<div class="workspace-card">
@@ -123,6 +183,7 @@ export default {
     const load = async (first, second) => {
       fileA = first;
       fileB = second;
+      compareOptions = advanced?.values || {};
       root.innerHTML = `<div class="workspace-card">
         <div class="custom-loading">${icon("LoaderCircle", { size: 22, className: "spin" })} Reading both PDFs…</div>
         <div data-progress></div>
@@ -132,8 +193,8 @@ export default {
       let docA;
       let docB;
       try {
-        docA = await openPdfJs(fileA);
-        docB = await openPdfJs(fileB);
+        docA = await openPdfJs(fileA, password);
+        docB = await openPdfJs(fileB, password);
         pageCount = Math.max(docA.numPages, docB.numPages);
         pageTextsA = [];
         pageTextsB = [];
@@ -155,37 +216,94 @@ export default {
           }
           await yieldToUi();
         }
-        diffs = [];
+        pageSignaturesA = [];
+        pageSignaturesB = [];
+        pixelDiffs = [];
         for (let index = 0; index < pageCount; index += 1) {
           progress.set(0.55 + (index / pageCount) * 0.42, `Comparing page ${index + 1} of ${pageCount}…`);
           diffs.push(diffWords(pageTextsA[index], pageTextsB[index]));
-          await yieldToUi();
+          if (compareMode !== "text") {
+            try {
+              const [sigA, sigB] = await Promise.all([
+                index < docA.numPages ? signatureOf(docA, index + 1) : null,
+                index < docB.numPages ? signatureOf(docB, index + 1) : null
+              ]);
+              pageSignaturesA.push(sigA);
+              pageSignaturesB.push(sigB);
+              pixelDiffs.push(pixelDifference(sigA, sigB));
+            } catch {
+              pixelDiffs.push(0);
+            }
+          }
         }
+        hasTextLayer = [...pageTextsA, ...pageTextsB].some((text) => String(text || "").trim().length > 12);
         progress.set(1, "Ready");
         renderWorkspace();
       } catch (error) {
         console.error(error);
-        toast(
-          /password|encrypted/i.test(String(error?.message))
-            ? "One of these PDFs is password-protected. Unlock it first, then compare."
-            : errorMessage(error),
-          { type: "error", duration: 7000 }
-        );
-        renderInitial();
+        if (isPasswordError(error)) {
+          promptPassword();
+        } else {
+          toast(errorMessage(error), { type: "error", duration: 7000 });
+          renderInitial();
+        }
       } finally {
-        await docA?.destroy();
-        await docB?.destroy();
+        await destroyPdfJs(docA);
+        await destroyPdfJs(docB);
       }
     };
 
+    const promptPassword = () => {
+      root.innerHTML = `<div class="workspace-card">
+        <div class="password-prompt">
+          <div class="password-prompt-icon">${icon("Lock", { size: 22 })}</div>
+          <div class="password-prompt-body">
+            <strong>These PDFs are password-protected</strong>
+            <p>Enter the password for the document(s). It stays in this tab.</p>
+            <div class="password-prompt-row">
+              <input class="input" type="password" placeholder="PDF password" data-compare-password />
+              <button type="button" class="button button-primary" data-compare-password-submit>${icon("LockOpen", {
+                size: 16
+              })} Open &amp; compare</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+      const input = root.querySelector("[data-compare-password]");
+      const submit = () => {
+        if (!input.value) {
+          input.focus();
+          return;
+        }
+        password = input.value;
+        load(fileA, fileB);
+      };
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") submit();
+      });
+      root.querySelector("[data-compare-password-submit]").addEventListener("click", submit);
+      input.focus();
+    };
+
+    const tolerance = () => Math.max(0, Number(advanced?.values?.pixelTolerance) || 0) / 100;
+
+    const pageChanged = (index) => {
+      const counts = changeCounts(diffs[index] || []);
+      if (hasTextLayer) return counts.changed;
+      return (pixelDiffs[index] || 0) > tolerance();
+    };
+
     const stats = () => {
-      const total = { added: 0, removed: 0, changedPages: 0 };
-      diffs.forEach((ops) => {
+      const total = { added: 0, removed: 0, changedPages: 0, pixelPages: 0, visual: !hasTextLayer };
+      diffs.forEach((ops, index) => {
         const counts = changeCounts(ops);
         total.added += counts.added;
         total.removed += counts.removed;
         if (counts.changed) total.changedPages += 1;
+        if ((pixelDiffs[index] || 0) > tolerance()) total.pixelPages += 1;
+        void index;
       });
+      if (!hasTextLayer) total.changedPages = total.pixelPages;
       return total;
     };
 
@@ -199,11 +317,17 @@ export default {
               <h3>${
                 summary.changedPages
                   ? `${summary.changedPages} page${summary.changedPages === 1 ? "" : "s"} changed`
-                  : "No text differences found"
+                  : summary.visual
+                    ? "Pages look identical"
+                    : "No text differences found"
               }</h3>
-              <p>${summary.added} addition${summary.added === 1 ? "" : "s"} · ${summary.removed} removal${
-                summary.removed === 1 ? "" : "s"
-              } · ${pageCount} page${pageCount === 1 ? "" : "s"} compared</p>
+              <p>${
+                summary.visual
+                  ? `Visual comparison of ${pageCount} page${pageCount === 1 ? "" : "s"} (no text layer found)`
+                  : `${summary.added} addition${summary.added === 1 ? "" : "s"} · ${summary.removed} removal${
+                      summary.removed === 1 ? "" : "s"
+                    } · ${pageCount} page${pageCount === 1 ? "" : "s"} compared`
+              }</p>
             </div>
           </div>
           <div class="compare-actions">
@@ -250,9 +374,19 @@ export default {
             <div class="compare-text"><div class="diff-panel" data-text-b></div></div>
           </div>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
+      const optionsHost = root.querySelector("[data-advanced-options]");
+      if (optionsHost) {
+        optionsHost.addEventListener("change", () => {
+          compareOptions = advanced?.values || {};
+          diffs = pageTextsA.map((text, index) => diffWords(text, pageTextsB[index]));
+          renderWorkspace();
+        });
+      }
       showPage(0);
     };
 
@@ -290,18 +424,31 @@ export default {
       const pageLabel = root.querySelector("[data-page-label]");
       if (!pageLabel) return;
       pageLabel.textContent = `Page ${currentPage + 1} of ${pageCount}`;
-      root.querySelector("[data-page-state]").textContent = counts.changed
-        ? `${counts.added} added · ${counts.removed} removed`
-        : "No changes";
-      root.querySelector("[data-page-state]").classList.toggle("is-unchanged", !counts.changed);
+      const pixel = pixelDiffs[currentPage] || 0;
+      const visualChanged = pixel > tolerance();
+      const stateEl = root.querySelector("[data-page-state]");
+      if (hasTextLayer) {
+        stateEl.textContent = counts.changed
+          ? `${counts.added} added · ${counts.removed} removed${pixel > tolerance() ? ` · ${Math.round(pixel * 100)}% pixels` : ""}`
+          : "No text changes";
+        stateEl.classList.toggle("is-unchanged", !counts.changed && !visualChanged);
+      } else {
+        stateEl.textContent = visualChanged ? `${Math.round(pixel * 100)}% different pixels` : "Pages look identical";
+        stateEl.classList.toggle("is-unchanged", !visualChanged);
+      }
       root.querySelector("[data-prev]").disabled = currentPage === 0;
       root.querySelector("[data-next]").disabled = currentPage === pageCount - 1;
+      const noText = hasTextLayer
+        ? `<span class="compare-missing">No text found on this page.</span>`
+        : `<span class="compare-missing">Scanned page — compared visually (${Math.round(
+            pixel * 100
+          )}% of pixels differ).</span>`;
       root.querySelector("[data-text-a]").innerHTML = ops.length
         ? diffHtml(ops.filter((op) => op.type !== "add"))
-        : `<span class="compare-missing">No text found on this page.</span>`;
+        : noText;
       root.querySelector("[data-text-b]").innerHTML = ops.length
         ? diffHtml(ops.filter((op) => op.type !== "remove"))
-        : `<span class="compare-missing">No text found on this page.</span>`;
+        : noText;
       root.querySelector("[data-count-a]").textContent = `${tokenize(pageTextsA[currentPage]).length} words`;
       root.querySelector("[data-count-b]").textContent = `${tokenize(pageTextsB[currentPage]).length} words`;
       await Promise.all([renderPreview("a", currentPage), renderPreview("b", currentPage)]);
@@ -312,14 +459,25 @@ export default {
       const sections = diffs
         .map((ops, index) => {
           const counts = changeCounts(ops);
-          if (!counts.changed) return "";
+          const includeSame = advanced?.values?.reportIncludeSame === true;
+          const pixel = pixelDiffs[index] || 0;
+          const visualChanged = pixel > tolerance();
+          if (!counts.changed && !includeSame && !visualChanged) return "";
+          if (!counts.changed) {
+            return `<section class="report-page"><h2>Page ${index + 1} <small>${
+              visualChanged ? `${Math.round(pixel * 100)}% pixels differ` : "no changes"
+            }</small></h2>${visualChanged && !hasTextLayer ? "<p>Scanned page — visual difference only.</p>" : ""}</section>`;
+          }
           return `<section class="report-page">
-            <h2>Page ${index + 1} <small>${counts.added} added · ${counts.removed} removed</small></h2>
+            <h2>Page ${index + 1} <small>${counts.added} added · ${counts.removed} removed${
+              visualChanged ? ` · ${Math.round(pixel * 100)}% pixels` : ""
+            }</small></h2>
             <div class="report-diff">${diffHtml(ops)}</div>
           </section>`;
         })
         .filter(Boolean)
         .join("");
+
       const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
         <title>PDF comparison report</title>
         <style>
@@ -337,11 +495,21 @@ export default {
           summary.changedPages === 1 ? "" : "s"
         }</strong><br />A: ${escapeHtml(fileA.name)}<br />B: ${escapeHtml(
           fileB.name
-        )}<br />${summary.added} additions · ${summary.removed} removals</div>
+        )}<br />${
+          summary.visual
+            ? "Compared visually (no text layer)"
+            : `${summary.added} additions · ${summary.removed} removals`
+        }</div>
         ${sections || "<p>No text differences were found.</p>"}
         </body></html>`;
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      downloadBlob(blob, `${sanitizeFilename(fileA.name, "document")}-comparison.html`);
+      const reportName = String(advanced?.values?.outputName || "").trim();
+      downloadBlob(
+        blob,
+        reportName
+          ? `${sanitizeFilename(reportName, "comparison")}.html`
+          : `${sanitizeFilename(fileA.name, "document")}-comparison.html`
+      );
       root.querySelector("[data-result]").innerHTML = `<p class="result-privacy">${icon("Check", {
         size: 14
       })} Report downloaded.</p>`;

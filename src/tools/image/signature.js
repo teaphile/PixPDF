@@ -3,6 +3,7 @@ import "@fontsource/dancing-script/400.css";
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   canvasToBlob,
   errorMessage,
@@ -13,6 +14,37 @@ import {
 
 const WIDTH = 1000;
 const HEIGHT = 320;
+
+function trimCanvas(canvas, padding = 0) {
+  const context = canvas.getContext("2d");
+  const { width, height } = canvas;
+  const { data } = context.getImageData(0, 0, width, height);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * 4 + 3] > 8) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  const pad = Math.max(0, Math.round(padding));
+  const x = Math.max(0, minX - pad);
+  const y = Math.max(0, minY - pad);
+  const cropWidth = Math.min(width - x, maxX - minX + 1 + pad * 2);
+  const cropHeight = Math.min(height - y, maxY - minY + 1 + pad * 2);
+  const out = document.createElement("canvas");
+  out.width = cropWidth;
+  out.height = cropHeight;
+  out.getContext("2d").drawImage(canvas, x, y, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+  return out;
+}
 
 export default {
   async mount(root, { tool }) {
@@ -27,6 +59,7 @@ export default {
     let active = null;
     let hasFile = false;
     let busy = false;
+    let advanced = null;
     let canvas = null;
     let context = null;
 
@@ -126,9 +159,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindStudio();
+      advanced = mountAdvancedPanel(root, tool);
       updatePreview();
     };
 
@@ -356,13 +391,47 @@ export default {
       button.disabled = true;
       button.innerHTML = `${icon("LoaderCircle", { size: 18, className: "spin" })} Exporting…`;
       try {
-        const out = exportCanvas();
+        const extra = advanced?.values || {};
+        let out = exportCanvas();
+        if (extra.trimWhitespace !== false) {
+          const trimmed = trimCanvas(out, Number(extra.signaturePadding) || 0);
+          if (trimmed) out = trimmed;
+        }
+        const targetWidth = Number(extra.signatureWidth) || 0;
+        if (targetWidth > 0 && targetWidth !== out.width) {
+          const ratio = targetWidth / out.width;
+          const scaled = document.createElement("canvas");
+          scaled.width = Math.max(1, Math.round(out.width * ratio));
+          scaled.height = Math.max(1, Math.round(out.height * ratio));
+          const scaledContext = scaled.getContext("2d");
+          scaledContext.imageSmoothingQuality = "high";
+          scaledContext.drawImage(out, 0, 0, scaled.width, scaled.height);
+          const guide = Number(extra.signatureGuide) || 0;
+          if (extra.signatureOutline) {
+            scaledContext.strokeStyle = "rgba(40,32,80,0.35)";
+            scaledContext.lineWidth = Math.max(1, scaled.height * 0.004);
+            scaledContext.beginPath();
+            scaledContext.moveTo(0, scaled.height - 2);
+            scaledContext.lineTo(scaled.width, scaled.height - 2);
+            scaledContext.stroke();
+          }
+          void guide;
+          out = scaled;
+        } else if (extra.signatureOutline) {
+          const guide = out.getContext("2d");
+          guide.strokeStyle = "rgba(40,32,80,0.35)";
+          guide.lineWidth = Math.max(1, out.height * 0.004);
+          guide.beginPath();
+          guide.moveTo(0, out.height - 2);
+          guide.lineTo(out.width, out.height - 2);
+          guide.stroke();
+        }
         const blob = await canvasToBlob(out, "image/png");
         const base = text.trim() ? sanitizeFilename(text.trim(), "signature") : "signature";
         renderResult(
           root.querySelector("[data-result]"),
           [{ blob, name: `${base}-signature.png` }],
-          { tool, inputs: 0 }
+          { tool, inputs: 0, outputOptions: advanced?.values }
         );
       } catch (error) {
         toast(errorMessage(error), { type: "error" });

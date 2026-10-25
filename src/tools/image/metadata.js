@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   canvasToBlob,
   errorMessage,
@@ -37,6 +38,7 @@ export default {
     let dpi = 300;
     let format = "keep";
     let busy = false;
+    let advanced = null;
 
     const renderInitial = () => {
       root.innerHTML = `<div class="workspace-card">
@@ -196,9 +198,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
     };
 
     const bindWorkspace = () => {
@@ -239,10 +243,14 @@ export default {
         const targetFormat = format === "keep" ? originalFormat : format === "jpg" ? "jpg" : format;
         let blob;
         let extension = targetFormat;
-        if (!strip && format === "keep") {
+        const extra = advanced?.values || {};
+        const maxWidth = Number(extra.maxWidth) || 0;
+        const rebuildWidth = maxWidth > 0 && maxWidth < loaded.width ? maxWidth : loaded.width;
+        const rebuildHeight = Math.round((loaded.height * rebuildWidth) / loaded.width);
+        if (!strip && format === "keep" && rebuildWidth === loaded.width) {
           blob = file;
         } else {
-          const canvas = makeCanvas(loaded.width, loaded.height);
+          const canvas = makeCanvas(rebuildWidth, rebuildHeight);
           const context = canvas.getContext("2d");
           if (targetFormat === "jpg") {
             context.fillStyle = "#ffffff";
@@ -266,7 +274,7 @@ export default {
         renderResult(
           root.querySelector("[data-result]"),
           [{ blob, name: `${base}${suffix}.${extension}` }],
-          { tool, inputs: file.size, duration: performance.now() - started }
+          { tool, inputs: file.size, duration: performance.now() - started, outputOptions: advanced?.values }
         );
       } catch (error) {
         toast(errorMessage(error), { type: "error" });

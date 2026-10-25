@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   canvasToBlob,
   errorMessage,
@@ -37,6 +38,7 @@ export default {
     let background = "#ffffff";
     let includeSheet = true;
     let busy = false;
+    let advanced = null;
 
     const dimensions = () => {
       const item = PRESETS[preset] || PRESETS["passport-35x45"];
@@ -199,10 +201,12 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
       drawPreview();
+      advanced = mountAdvancedPanel(root, tool);
     };
 
     const drawCrop = (canvas, targetWidth, targetHeight) => {
@@ -327,10 +331,17 @@ export default {
       const started = performance.now();
       try {
         const size = dimensions();
+        const extra = advanced?.values || {};
         const photoWidth = Math.round((size.width / 25.4) * dpi);
         const photoHeight = Math.round((size.height / 25.4) * dpi);
         const photoCanvas = makeCanvas(photoWidth, photoHeight);
         drawCrop(photoCanvas, photoWidth, photoHeight);
+        if (extra.photoBorder !== false) {
+          const ctx = photoCanvas.getContext("2d");
+          ctx.strokeStyle = "#d8d5e4";
+          ctx.lineWidth = Math.max(1, (Number(extra.photoBorderWidth) || 1) * (dpi / 300));
+          ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, photoCanvas.width - ctx.lineWidth, photoCanvas.height - ctx.lineWidth);
+        }
         const photoBlob = await canvasToBlob(photoCanvas, "image/png");
         const base = sanitizeFilename(file.name, "photo");
         const outputs = [
@@ -372,6 +383,7 @@ export default {
         }
         renderResult(root.querySelector("[data-result]"), outputs, {
           tool,
+          outputOptions: advanced?.values,
           inputs: file.size,
           duration: performance.now() - started
         });

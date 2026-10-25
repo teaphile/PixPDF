@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import { cropImage, loadImageSource } from "../../lib/image.js";
 import {
   clamp,
@@ -17,7 +18,17 @@ const ASPECTS = [
   { label: "4:3", value: String(4 / 3) },
   { label: "3:2", value: "1.5" },
   { label: "16:9", value: String(16 / 9) },
-  { label: "9:16", value: String(9 / 16) }
+  { label: "9:16", value: String(9 / 16) },
+  { label: "A4", value: String(210 / 297) }
+];
+
+const SIZE_PRESETS = [
+  { label: "Original", value: "original" },
+  { label: "1080 × 1080", value: "1080x1080" },
+  { label: "1920 × 1080", value: "1920x1080" },
+  { label: "1200 × 630", value: "1200x630" },
+  { label: "600 × 600", value: "600x600" },
+  { label: "Passport 413 × 531", value: "413x531" }
 ];
 
 export default {
@@ -30,6 +41,8 @@ export default {
     let aspect = "free";
     let drag = null;
     let busy = false;
+    let advanced = null;
+    let rotation = 0;
 
     const renderInitial = () => {
       root.innerHTML = `<div class="workspace-card">
@@ -41,7 +54,7 @@ export default {
         })}
         <div class="organize-empty-note">${icon("Info", {
           size: 15
-        })} Drag the frame to reposition, pull a handle to resize, or pick an aspect ratio.</div>
+        })} Drag the frame, pull a handle, or type exact pixels and a max file size in KB.</div>
       </div>`;
       bindDropzone(root, (files) => {
         const image = files.find(isImageFile);
@@ -68,6 +81,7 @@ export default {
         previewUrl = URL.createObjectURL(file);
         crop = { x: 0.08, y: 0.08, w: 0.84, h: 0.84 };
         aspect = "free";
+        rotation = 0;
         renderWorkspace();
       } catch (error) {
         toast(errorMessage(error), { type: "error" });
@@ -75,7 +89,21 @@ export default {
       }
     };
 
+    const selectionPixels = () => {
+      const x = Math.round(crop.x * imageWidth);
+      const y = Math.round(crop.y * imageHeight);
+      const width = Math.max(1, Math.round(crop.w * imageWidth));
+      const height = Math.max(1, Math.round(crop.h * imageHeight));
+      return {
+        x: clamp(x, 0, imageWidth - 1),
+        y: clamp(y, 0, imageHeight - 1),
+        width: Math.min(width, imageWidth - x),
+        height: Math.min(height, imageHeight - y)
+      };
+    };
+
     const renderWorkspace = () => {
+      const selection = selectionPixels();
       root.innerHTML = `<div class="workspace-card crop-editor-card">
         <div class="organize-toolbar">
           <div class="organize-file">
@@ -102,7 +130,8 @@ export default {
           <div class="crop-canvas-area">
             <div class="crop-stage" data-stage>
               <div class="crop-image-wrap" data-image-wrap>
-                <img src="${previewUrl}" alt="${escapeHtml(file.name)}" draggable="false" data-crop-image />
+                <img src="${previewUrl}" alt="${escapeHtml(file.name)}" draggable="false" data-crop-image
+                  style="transform: rotate(${rotation}deg); max-width: ${rotation % 180 === 0 ? "100%" : "70%"};" />
                 <div class="crop-overlay" data-overlay>
                   <div class="crop-grid" aria-hidden="true"></div>
                   ${["nw", "n", "ne", "e", "se", "s", "sw", "w"]
@@ -130,8 +159,36 @@ export default {
                 ).join("")}
               </div>
             </div>
+            <div class="field field-wide">
+              <span class="field-label">Selection (pixels)</span>
+              <div class="crop-number-grid">
+                <label>X <input class="input" type="number" min="0" max="${imageWidth - 1}" value="${selection.x}" data-sel="x" /></label>
+                <label>Y <input class="input" type="number" min="0" max="${imageHeight - 1}" value="${selection.y}" data-sel="y" /></label>
+                <label>W <input class="input" type="number" min="1" max="${imageWidth}" value="${selection.width}" data-sel="w" /></label>
+                <label>H <input class="input" type="number" min="1" max="${imageHeight}" value="${selection.height}" data-sel="h" /></label>
+              </div>
+            </div>
+            <div class="field field-wide">
+              <label class="field-label" for="crop-size-preset">Output size</label>
+              <div class="select-wrap">
+                <select id="crop-size-preset" data-size-preset>
+                  ${SIZE_PRESETS.map(
+                    (preset) =>
+                      `<option value="${preset.value}">${preset.label === "Original" ? "Same as crop" : preset.label}</option>`
+                  ).join("")}
+                </select>
+                ${icon("ChevronDown", { size: 16 })}
+              </div>
+            </div>
+            <div class="field field-wide">
+              <span class="field-label">Exact output (pixels)</span>
+              <div class="crop-number-grid">
+                <label>W<input class="input" type="number" min="1" max="20000" value="${selection.width}" data-out="w" /></label>
+                <label>H<input class="input" type="number" min="1" max="20000" value="${selection.height}" data-out="h" /></label>
+              </div>
+            </div>
             <div class="field">
-              <label class="field-label" for="crop-format">Output format</label>
+              <label class="field-label" for="crop-format">Format</label>
               <div class="select-wrap">
                 <select id="crop-format" data-crop-format>
                   <option value="png">PNG — lossless</option>
@@ -141,12 +198,24 @@ export default {
                 ${icon("ChevronDown", { size: 16 })}
               </div>
             </div>
+            <div class="field">
+              <label class="field-label" for="crop-maxkb">Max size (KB)</label>
+              <input id="crop-maxkb" class="input" type="number" min="1" max="102400" placeholder="No limit" data-max-kb />
+            </div>
             <div class="field field-range">
               <div class="range-head">
                 <label class="field-label" for="crop-quality">Quality</label>
                 <output data-quality-value>92%</output>
               </div>
-              <input id="crop-quality" type="range" min="0.5" max="1" step="0.02" value="0.92" data-crop-quality />
+              <input id="crop-quality" type="range" min="0.3" max="1" step="0.02" value="0.92" data-crop-quality />
+            </div>
+            <div class="field field-wide">
+              <span class="field-label">Rotate preview</span>
+              <div class="aspect-chips">
+                <button type="button" class="chip" data-rotate="-90">⟲ 90°</button>
+                <button type="button" class="chip" data-rotate="90">⟳ 90°</button>
+                <button type="button" class="chip" data-rotate="0">Reset</button>
+              </div>
             </div>
             <div class="crop-tip">${icon("Info", {
               size: 14
@@ -157,9 +226,11 @@ export default {
             )} ${escapeHtml(tool.action)}</button>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindEditor();
+      advanced = mountAdvancedPanel(root, tool);
       renderCrop();
     };
 
@@ -173,11 +244,16 @@ export default {
       });
 
       root.querySelector("[data-reset-crop]").addEventListener("click", () => {
-        crop = { x: 0.08, y: 0.08, w: 0.84, h: 0.84 };
+        crop = { x: 0, y: 0, w: 1, h: 1 };
         aspect = "free";
+        rotation = 0;
+        root.querySelector("[data-crop-image]").style.transform = "rotate(0deg)";
         root.querySelectorAll("[data-aspect]").forEach((chip) => {
           chip.classList.toggle("is-active", chip.dataset.aspect === "free");
         });
+        root.querySelector("[data-out='w']").value = imageWidth;
+        root.querySelector("[data-out='h']").value = imageHeight;
+        root.querySelector("[data-size-preset]").value = "original";
         renderCrop();
       });
 
@@ -190,6 +266,49 @@ export default {
           if (aspect !== "free") fitAspect(Number(aspect));
           renderCrop();
         });
+      });
+
+      root.querySelectorAll("[data-rotate]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = Number(button.dataset.rotate);
+          rotation = value === 0 ? 0 : (rotation + value + 360) % 360;
+          const image = root.querySelector("[data-crop-image]");
+          image.style.transform = `rotate(${rotation}deg)`;
+          image.style.maxWidth = rotation % 180 === 0 ? "100%" : "70%";
+        });
+      });
+
+      root.querySelectorAll("[data-sel]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const target = selectionPixels();
+          const value = Number(input.value);
+          if (input.dataset.sel === "x") target.x = clamp(value, 0, imageWidth - target.width);
+          if (input.dataset.sel === "y") target.y = clamp(value, 0, imageHeight - target.height);
+          if (input.dataset.sel === "w") target.width = clamp(value, 1, imageWidth - target.x);
+          if (input.dataset.sel === "h") target.height = clamp(value, 1, imageHeight - target.y);
+          crop = {
+            x: target.x / imageWidth,
+            y: target.y / imageHeight,
+            w: target.width / imageWidth,
+            h: target.height / imageHeight
+          };
+          renderCrop();
+        });
+      });
+
+      root.querySelector("[data-size-preset]").addEventListener("change", (event) => {
+        const preset = event.target.value;
+        const selection = selectionPixels();
+        const outW = root.querySelector("[data-out='w']");
+        const outH = root.querySelector("[data-out='h']");
+        if (preset === "original") {
+          outW.value = selection.width;
+          outH.value = selection.height;
+          return;
+        }
+        const [w, h] = preset.split("x").map(Number);
+        outW.value = w;
+        outH.value = h;
       });
 
       root.querySelector("[data-crop-format]").addEventListener("change", (event) => {
@@ -248,9 +367,7 @@ export default {
           if (handle.includes("s")) {
             next.h = clamp(drag.start.h + dy, 0.03, 1 - drag.start.y);
           }
-          if (drag.aspect) {
-            applyAspectToCrop(next, handle, drag.aspect);
-          }
+          if (drag.aspect) applyAspectToCrop(next, handle, drag.aspect);
         }
         crop = {
           x: clamp(next.x, 0, Math.max(0, 1 - next.w)),
@@ -258,7 +375,7 @@ export default {
           w: clamp(next.w, 0.03, 1),
           h: clamp(next.h, 0.03, 1)
         };
-        renderCrop();
+        renderCrop(true);
       });
       const endDrag = (event) => {
         if (!drag) return;
@@ -329,17 +446,16 @@ export default {
       };
     };
 
-    const renderCrop = () => {
+    const renderCrop = (syncInputs = false) => {
       const overlay = root.querySelector("[data-overlay]");
       if (!overlay) return;
       overlay.style.left = `${crop.x * 100}%`;
       overlay.style.top = `${crop.y * 100}%`;
       overlay.style.width = `${crop.w * 100}%`;
       overlay.style.height = `${crop.h * 100}%`;
-      const width = Math.max(1, Math.round(crop.w * imageWidth));
-      const height = Math.max(1, Math.round(crop.h * imageHeight));
+      const selection = selectionPixels();
       const sizeEl = root.querySelector("[data-crop-size]");
-      if (sizeEl) sizeEl.textContent = `${width} × ${height} px`;
+      if (sizeEl) sizeEl.textContent = `${selection.width} × ${selection.height} px`;
       const ratioEl = root.querySelector("[data-crop-ratio]");
       if (ratioEl) {
         if (aspect === "free") {
@@ -347,6 +463,18 @@ export default {
         } else {
           const label = ASPECTS.find((item) => item.value === aspect)?.label || "";
           ratioEl.textContent = `${label} aspect`;
+        }
+      }
+      if (syncInputs) {
+        root.querySelector("[data-sel='x']").value = selection.x;
+        root.querySelector("[data-sel='y']").value = selection.y;
+        root.querySelector("[data-sel='w']").value = selection.width;
+        root.querySelector("[data-sel='h']").value = selection.height;
+        const outW = root.querySelector("[data-out='w']");
+        const outH = root.querySelector("[data-out='h']");
+        if (root.querySelector("[data-size-preset]").value === "original") {
+          outW.value = selection.width;
+          outH.value = selection.height;
         }
       }
     };
@@ -362,18 +490,24 @@ export default {
       try {
         const format = root.querySelector("[data-crop-format]").value;
         const quality = Number(root.querySelector("[data-crop-quality]").value);
-        const sourceCrop = {
-          x: Math.round(crop.x * imageWidth),
-          y: Math.round(crop.y * imageHeight),
-          width: Math.max(1, Math.round(crop.w * imageWidth)),
-          height: Math.max(1, Math.round(crop.h * imageHeight))
-        };
-        sourceCrop.width = Math.min(sourceCrop.width, imageWidth - sourceCrop.x);
-        sourceCrop.height = Math.min(sourceCrop.height, imageHeight - sourceCrop.y);
-        const result = await cropImage(file, sourceCrop, { format, quality });
-        result.name = `${sanitizeFilename(file.name, "image")}-${sourceCrop.width}x${sourceCrop.height}.${format}`;
-        renderResult(resultEl, [result], {
+        const maxKb = Number(root.querySelector("[data-max-kb]").value) || 0;
+        const outWidth = Number(root.querySelector("[data-out='w']").value) || undefined;
+        const outHeight = Number(root.querySelector("[data-out='h']").value) || undefined;
+        const selection = selectionPixels();
+        const result = await cropImage(
+          file,
+          {
+            ...selection,
+            targetWidth: outWidth,
+            targetHeight: outHeight,
+            maxKb
+          },
+          { format, quality }
+        );
+        result.name = `${sanitizeFilename(file.name, "image")}-${result.width}x${result.height}.${format}`;
+        await renderResult(resultEl, [result], {
           tool,
+          outputOptions: advanced?.values,
           inputs: file.size,
           onReset: () => {
             if (previewUrl) URL.revokeObjectURL(previewUrl);

@@ -2859,3 +2859,217 @@
     gap: 10px;
   }
 }
+
+/* -------------------------------------------------------------------------
+   Advanced manual controls (shared by standard + visual workspaces)
+   ------------------------------------------------------------------------- */
+.field-heading {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.field-heading span {
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.field[hidden] {
+  display: none !important;
+}
+
+.input-with-suffix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-suffix .input {
+  padding-right: 52px;
+}
+
+.input-suffix {
+  position: absolute;
+  right: 10px;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.textarea-input {
+  min-height: 62px;
+  resize: vertical;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.choice-chips {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.choice-chips .choice {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 11.5px;
+}
+
+.choice-chips .choice input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.custom-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 76%, var(--primary) 4%);
+}
+
+.custom-options:empty {
+  display: none;
+}
+
+.custom-options-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.custom-options-head svg {
+  color: var(--primary);
+}
+
+.result-notes {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+
+.result-notes p {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.result-notes svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--primary);
+}
+
+@media (max-width: 680px) {
+  .custom-options,
+  .option-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Manual crop inputs */
+.crop-number-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.crop-number-grid label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.crop-number-grid label .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.crop-number-grid .input {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.aspect-chips .chip {
+  cursor: pointer;
+}
+
+/* Collapsible advanced panel used by the visual tools */
+.advanced-panel {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.advanced-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.advanced-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-panel > summary svg {
+  color: var(--primary);
+}
+
+.advanced-panel > summary em {
+  margin-left: auto;
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.advanced-panel .advanced-chevron {
+  transition: transform var(--transition);
+}
+
+.advanced-panel[open] .advanced-chevron {
+  transform: rotate(180deg);
+}
+
+.advanced-panel .custom-options {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}

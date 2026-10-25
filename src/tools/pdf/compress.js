@@ -1,4 +1,4 @@
-import { compressPdfLossless, compressPdfStrong } from "../../lib/pdf.js";
+import { compressPdfLossless, compressPdfStrong, copyPdfMetadata, openPdf, savePdf } from "../../lib/pdf.js";
 import { sanitizeFilename } from "../../lib/utils.js";
 
 export default {
@@ -17,6 +17,16 @@ export default {
         blob = await compressPdfLossless(file, { progress: wrapper, password: options.password });
       } else {
         blob = await compressPdfStrong(file, options, { progress: wrapper, password: options.password });
+      }
+      if (options.keepMetadata !== false) {
+        try {
+          const original = await openPdf(file, options.password);
+          const rebuilt = await openPdf(new Blob([await blob.arrayBuffer()], { type: "application/pdf" }));
+          copyPdfMetadata(original, rebuilt);
+          blob = new Blob([await savePdf(rebuilt)], { type: "application/pdf" });
+        } catch {
+          /* metadata copy is best effort */
+        }
       }
       outputs.push({
         blob,

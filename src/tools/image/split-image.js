@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   canvasToBlob,
   formatBytes,
@@ -26,6 +27,7 @@ export default {
     let format = "jpg";
     let quality = 0.92;
     let busy = false;
+    let advanced = null;
 
     const renderInitial = () => {
       root.innerHTML = `<div class="workspace-card">
@@ -142,9 +144,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
       renderGrid();
     };
 
@@ -213,11 +217,22 @@ export default {
         const base = sanitizeFilename(file.name, "image");
         for (let row = 0; row < rows; row += 1) {
           for (let col = 0; col < cols; col += 1) {
-            const x = Math.round((col * loaded.width) / cols);
-            const y = Math.round((row * loaded.height) / rows);
-            const right = Math.round(((col + 1) * loaded.width) / cols);
-            const bottom = Math.round(((row + 1) * loaded.height) / rows);
-            const canvas = makeCanvas(right - x, bottom - y);
+            const extra = advanced?.values || {};
+            const overlap = Math.max(0, Number(extra.overlap) || 0);
+            const cellWidth = loaded.width / cols;
+            const cellHeight = loaded.height / rows;
+            const x = Math.max(0, Math.round(col * cellWidth - (col ? overlap / 2 : 0)));
+            const y = Math.max(0, Math.round(row * cellHeight - (row ? overlap / 2 : 0)));
+            const right = Math.min(loaded.width, Math.round((col + 1) * cellWidth + (col < cols - 1 ? overlap / 2 : 0)));
+            const bottom = Math.min(loaded.height, Math.round((row + 1) * cellHeight + (row < rows - 1 ? overlap / 2 : 0)));
+            let targetWidth = right - x;
+            let targetHeight = bottom - y;
+            if (extra.squareTiles) {
+              const side = Math.max(targetWidth, targetHeight);
+              targetWidth = side;
+              targetHeight = side;
+            }
+            const canvas = makeCanvas(targetWidth, targetHeight);
             const context = canvas.getContext("2d");
             if (format === "jpg") {
               context.fillStyle = "#ffffff";
@@ -246,6 +261,7 @@ export default {
         }
         renderResult(root.querySelector("[data-result]"), outputs, {
           tool,
+          outputOptions: advanced?.values,
           inputs: file.size,
           duration: performance.now() - started
         });

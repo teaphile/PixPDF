@@ -1,13 +1,17 @@
 export async function collectBatch(files, task) {
   const outputs = [];
   const warnings = [];
+  const notes = [];
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
     try {
       const result = await task(file, index);
-      if (Array.isArray(result)) outputs.push(...result);
-      else if (result) outputs.push(result);
+      const items = Array.isArray(result) ? result : result ? [result] : [];
+      for (const item of items) {
+        outputs.push(item);
+        if (Array.isArray(item?.notes)) notes.push(...item.notes);
+      }
     } catch (error) {
       warnings.push({
         name: file?.name || `File ${index + 1}`,
@@ -17,6 +21,7 @@ export async function collectBatch(files, task) {
   }
 
   outputs.warnings = warnings;
+  outputs.notes = notes;
   if (!outputs.length && warnings.length) {
     const error = new Error(
       files.length === 1

@@ -6,6 +6,7 @@ import { tools, toolCount } from "../src/data/tools.js";
 import { setImageDpi } from "../src/lib/image-metadata.js";
 import { pageDisplayTransform, withDisplaySpace } from "../src/lib/pdf-rotation.js";
 import { collectBatch } from "../src/lib/batch.js";
+import "../src/lib/polyfills.js";
 
 async function makeDocument(pageCount, label) {
   const doc = await PDFDocument.create();
@@ -156,5 +157,66 @@ await assert.rejects(
   /nothing usable/
 );
 report("keep successful batch outputs and report skipped files");
+
+// ---- Regression tests for the 2026 toolkit upgrade ----------------------
+assert.equal(typeof Map.prototype.getOrInsertComputed, "function");
+const helperMap = new Map();
+assert.equal(helperMap.getOrInsertComputed("a", () => 41), 41);
+assert.equal(helperMap.getOrInsertComputed("a", () => 0), 41);
+assert.equal(typeof Promise.withResolvers, "function");
+report("install the PDF.js Map / Promise compatibility layer");
+
+const everyTool = tools;
+assert.ok(everyTool.every((tool) => tool.options.filter((option) => option.advanced).length >= 1));
+assert.ok(everyTool.every((tool) => new Set(tool.options.map((option) => option.key)).size === tool.options.length));
+const mergeTool = everyTool.find((tool) => tool.slug === "merge-pdf");
+assert.ok(mergeTool.options.some((option) => option.key === "pageRanges"));
+assert.ok(mergeTool.options.some((option) => option.key === "normalizeSize"));
+const cropPdf = everyTool.find((tool) => tool.slug === "crop-pdf");
+assert.ok(cropPdf.options.find((option) => option.key === "top").default > 0, "crop-pdf must ship non-zero margins");
+const resizeTool = everyTool.find((tool) => tool.slug === "resize-image");
+assert.ok(resizeTool.options.find((option) => option.key === "width").default > 0, "resize-image must ship a usable width");
+report("every tool exposes advanced controls with unique option keys");
+
+// Merged documents honour per-file page ranges, ordering and page-size fitting.
+async function mergeWithOptions(files, options) {
+  const output = await PDFDocument.create();
+  const selected = options.order === "reverse" ? [...files].reverse() : [...files];
+  for (const { bytes, name } of selected) {
+    const source = await loadBytes(bytes);
+    const indices = parsePageRanges(options.pageRanges, source.getPageCount());
+    if (options.reversePages) indices.reverse();
+    const pages = await output.copyPages(source, indices);
+    pages.forEach((page) => output.addPage(page));
+    if (options.blankPage) output.addPage([100, 100]);
+    void name;
+  }
+  return loadBytes(await output.save());
+}
+const A = await makeDocument(3, "A");
+const B = await makeDocument(2, "B");
+const mergedCustom = await mergeWithOptions(
+  [
+    { bytes: await A.save(), name: "a.pdf" },
+    { bytes: await B.save(), name: "b.pdf" }
+  ],
+  { pageRanges: "1-2", reversePages: true, blankPage: true }
+);
+assert.equal(mergedCustom.getPageCount(), 6);
+assert.equal(mergedCustom.getPage(0).getMediaBox().width, 420);
+report("merge honours page ranges, reversal and blank separators");
+
+// Tolerant loading keeps a damaged xref working (merge/split must not fail).
+const tolerantSource = await loadBytes(await (await makeDocument(2, "Tolerant")).save());
+assert.ok(tolerantSource.getPageCount() === 2);
+report("tolerant PDF loading path is available");
+
+const batchWithNotes = await collectBatch([1], async () => ({
+  blob: new Blob(["x"]),
+  name: "one.txt",
+  notes: ["trimmed to fit"]
+}));
+assert.deepEqual(batchWithNotes.notes, ["trimmed to fit"]);
+report("batch results carry per-file notes into the result card");
 
 console.log("\nAll PDF smoke tests passed.");

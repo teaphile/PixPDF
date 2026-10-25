@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import { editImage, loadImageSource } from "../../lib/image.js";
 import {
   errorMessage,
@@ -40,6 +41,7 @@ export default {
     let previewUrl = null;
     let state = { ...DEFAULTS };
     let busy = false;
+    let advanced = null;
     let raf = null;
 
     const renderInitial = () => {
@@ -176,10 +178,12 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindEditor();
       drawPreview();
+      advanced = mountAdvancedPanel(root, tool);
     };
 
     const bindEditor = () => {
@@ -304,10 +308,24 @@ export default {
       const format = root.querySelector("[data-format]").value;
       const quality = Number(root.querySelector("[data-quality]").value);
       try {
-        const result = await editImage(file, state, { format, quality });
+        const extra = advanced?.values || {};
+        const result = await editImage(
+          file,
+          {
+            ...state,
+            targetWidth: Number(extra.outputWidth) || 0,
+            targetHeight: Number(extra.outputHeight) || 0,
+            exportScale: (Number(extra.outputScale) || 100) / 100,
+            sharpen: Number(extra.sharpen) || 0,
+            vignette: Number(extra.vignette) || 0,
+            background: extra.outputBackground || "#ffffff"
+          },
+          { format, quality }
+        );
         result.name = `${sanitizeFilename(file.name, "image")}-edited.${format}`;
         renderResult(resultEl, [result], {
           tool,
+          outputOptions: advanced?.values,
           inputs: file.size,
           onReset: () => {
             loaded?.dispose?.();

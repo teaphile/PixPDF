@@ -1,6 +1,7 @@
 import { icon } from "../../ui/icons.js";
 import { toast } from "../../ui/toast.js";
 import { bindDropzone, dropzoneMarkup, renderResult } from "../../ui/result.js";
+import { advancedPanelMarkup, mountAdvancedPanel } from "../../ui/advanced-panel.js";
 import {
   canvasToBlob,
   errorMessage,
@@ -26,6 +27,7 @@ export default {
     let format = "jpg";
     let quality = 0.92;
     let busy = false;
+    let advanced = null;
     let dragIndex = null;
 
     const renderInitial = () => {
@@ -143,9 +145,11 @@ export default {
             </div>
           </aside>
         </div>
+        ${advancedPanelMarkup(tool)}
         <div data-result></div>
       </div>`;
       bindWorkspace();
+      advanced = mountAdvancedPanel(root, tool);
       renderList();
     };
 
@@ -283,6 +287,9 @@ export default {
         for (const entry of entries) {
           loadedList.push({ entry, loaded: await loadImageSource(entry.file) });
         }
+        const extra = advanced?.values || {};
+        const align = extra.align || "center";
+        const maxSide = Math.max(200, Number(extra.maxSize) || 12000);
         let scale = 1;
         let totalWidth;
         let totalHeight;
@@ -291,13 +298,13 @@ export default {
           const widths = loadedList.map((item) => (item.loaded.width * maxHeight) / item.loaded.height);
           totalWidth = widths.reduce((sum, width) => sum + width, 0) + gap * (loadedList.length - 1);
           totalHeight = maxHeight;
-          if (totalWidth > 12000) scale = 12000 / totalWidth;
+          if (totalWidth > maxSide) scale = maxSide / totalWidth;
         } else {
           const maxWidth = Math.max(...loadedList.map((item) => item.loaded.width));
           const heights = loadedList.map((item) => (item.loaded.height * maxWidth) / item.loaded.width);
           totalWidth = maxWidth;
           totalHeight = heights.reduce((sum, height) => sum + height, 0) + gap * (loadedList.length - 1);
-          if (totalHeight > 12000) scale = 12000 / totalHeight;
+          if (totalHeight > maxSide) scale = maxSide / totalHeight;
         }
         const canvas = makeCanvas(totalWidth * scale, totalHeight * scale);
         const context = canvas.getContext("2d");
@@ -310,17 +317,31 @@ export default {
           if (direction === "horizontal") {
             height = loaded.height * scale;
             width = (loaded.width * height) / loaded.height;
-            drawSource(context, loaded.source, offset, 0, width, height);
+            const y = align === "start" ? 0 : align === "end" ? canvas.height - height : (canvas.height - height) / 2;
+            drawSource(context, loaded.source, offset, y, width, height);
             offset += width + gap * scale;
           } else {
             width = loaded.width * scale;
             height = (loaded.height * width) / loaded.width;
-            drawSource(context, loaded.source, 0, offset, width, height);
+            const x = align === "start" ? 0 : align === "end" ? canvas.width - width : (canvas.width - width) / 2;
+            drawSource(context, loaded.source, x, offset, width, height);
             offset += height + gap * scale;
           }
         }
+        let finalCanvas = canvas;
+        const borderWidth = Math.round(Number(extra.borderWidth) || 0);
+        if (extra.addBorder && borderWidth > 0) {
+          const framed = makeCanvas(canvas.width + borderWidth * 2, canvas.height + borderWidth * 2);
+          const framedContext = framed.getContext("2d");
+          framedContext.fillStyle = extra.borderColor || "#ffffff";
+          framedContext.fillRect(0, 0, framed.width, framed.height);
+          framedContext.drawImage(canvas, borderWidth, borderWidth);
+          canvas.width = 1;
+          canvas.height = 1;
+          finalCanvas = framed;
+        }
         const blob = await canvasToBlob(
-          canvas,
+          finalCanvas,
           mimeFor(format),
           format === "png" ? undefined : quality
         );
@@ -332,7 +353,7 @@ export default {
               name: `${sanitizeFilename(entries[0].file.name, "images")}-joined.${format}`
             }
           ],
-          { tool, inputs: entries.reduce((sum, entry) => sum + entry.file.size, 0), duration: performance.now() - started }
+          { tool, inputs: entries.reduce((sum, entry) => sum + entry.file.size, 0), duration: performance.now() - started, outputOptions: advanced?.values }
         );
       } catch (error) {
         toast(errorMessage(error), { type: "error" });

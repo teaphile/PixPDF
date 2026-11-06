@@ -9,6 +9,7 @@ import { tools, toolCount } from "../src/data/tools.js";
 import { setImageDpi } from "../src/lib/image-metadata.js";
 import { pageDisplayTransform, withDisplaySpace } from "../src/lib/pdf-rotation.js";
 import { collectBatch } from "../src/lib/batch.js";
+import { createToolLoader, registeredToolSlugs } from "../src/tools/registry.js";
 import "../src/lib/polyfills.js";
 
 async function makeDocument(pageCount, label) {
@@ -116,6 +117,46 @@ assert.ok(tools.some((tool) => tool.slug === "edit-pdf"));
 assert.ok(tools.some((tool) => tool.slug === "annotate-image"));
 assert.ok(toolCount >= 41);
 report(`tool catalogue contains ${toolCount} unique tools`);
+
+assert.deepEqual(
+  [...registeredToolSlugs].sort(),
+  tools.map((tool) => tool.slug).sort(),
+  "every visible tool must have exactly one registered implementation"
+);
+report("tool catalogue and lazy-loader registry stay in sync");
+
+let retryAttempts = 0;
+const retryLoader = createToolLoader({
+  "retryable-tool": async () => {
+    retryAttempts += 1;
+    if (retryAttempts === 1) throw new Error("simulated transient chunk failure");
+    return { default: { process() {} } };
+  }
+});
+await assert.rejects(retryLoader("retryable-tool"), /transient chunk failure/);
+const recoveredTool = await retryLoader("retryable-tool");
+assert.equal(typeof recoveredTool.process, "function");
+assert.equal(retryAttempts, 2);
+report("a failed lazy import is evicted and can be retried");
+
+let sharedLoads = 0;
+const concurrentLoader = createToolLoader({
+  shared: async () => {
+    sharedLoads += 1;
+    await Promise.resolve();
+    return { default: { id: "shared" } };
+  }
+});
+const [firstLoad, secondLoad] = await Promise.all([
+  concurrentLoader("shared"),
+  concurrentLoader("shared")
+]);
+assert.strictEqual(firstLoad, secondLoad);
+assert.equal(sharedLoads, 1);
+report("concurrent navigation shares one in-flight tool import");
+
+await assert.rejects(() => concurrentLoader("missing-tool"), /Unknown tool/);
+report("unknown tool slugs fail with a clear error");
 
 const onePixelPng = Uint8Array.from(
   Buffer.from(

@@ -39,16 +39,43 @@ const loaders = {
   "join-images": () => import("./image/join.js"),
   "social-resize": () => import("./image/social-resize.js"),
   "image-border": () => import("./image/border.js"),
-  "annotate-image": () => import("./image/annotate.js"),
+  "annotate-image": () => import("./image/annotate.js")
+};
+
+export const registeredToolSlugs = Object.freeze(Object.keys(loaders));
+
+/**
+ * Create a lazy module loader with in-flight request de-duplication.
+ *
+ * A rejected dynamic import must not remain cached: chunk requests can fail
+ * transiently (offline mode, interrupted deploy, flaky connection). Keeping
+ * that rejected Promise permanently makes the tool unusable until a full
+ * page reload. Successful imports stay cached; failed imports are evicted so
+ * the next navigation can retry.
+ */
+export function createToolLoader(toolLoaders) {
+  const moduleCache = new Map();
+
+  return async function loadToolModule(slug) {
+    if (moduleCache.has(slug)) return moduleCache.get(slug);
+
+    const loader = toolLoaders[slug];
+    if (typeof loader !== "function") throw new Error(`Unknown tool: ${slug}`);
+
+    const pending = Promise.resolve()
+      .then(loader)
+      .then((module) => module?.default ?? module);
+
+    moduleCache.set(slug, pending);
+
+    try {
+      return await pending;
+    } catch (error) {
+      // Do not delete a newer request if this loader was superseded.
+      if (moduleCache.get(slug) === pending) moduleCache.delete(slug);
+      throw error;
+    }
+  };
 }
 
-const moduleCache = new Map();
-
-export async function loadToolModule(slug) {
-  if (moduleCache.has(slug)) return moduleCache.get(slug);
-  const loader = loaders[slug];
-  if (!loader) throw new Error(`Unknown tool: ${slug}`);
-  const loaded = loader().then((module) => module.default || module);
-  moduleCache.set(slug, loaded);
-  return loaded;
-}
+export const loadToolModule = createToolLoader(loaders);
